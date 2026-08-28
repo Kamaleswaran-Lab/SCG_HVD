@@ -69,7 +69,10 @@ def main():
 
     df, class_names = load_task(a.task)
     n_classes = len(class_names)
+    # 시드 하나만 돌릴 때는 출력 경로에 시드를 넣는다. 배열 잡으로 병렬 실행해도 덮어쓰지 않는다.
     root = a.out / a.task / a.model
+    if len(a.seeds) == 1:
+        root = root / f"seed{a.seeds[0]}"
     root.mkdir(parents=True, exist_ok=True)
 
     print(f"===== {a.task} / {a.model} | {a.folds}-fold x {len(a.seeds)} seed =====")
