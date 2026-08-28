@@ -51,6 +51,26 @@ class TrainConfig:
     amp: bool = True
 
 
+def balanced_class_weights(labels, num_classes):
+    """전체 클래스 길이의 balanced 가중치 벡터를 만든다.
+
+    환자 단위 fold 에서는 학습 분할에 아예 없는 클래스가 생길 수 있다. Task II 의 AS-AR 은
+    환자가 1명뿐이라 그 환자가 test 로 가는 fold 에서는 학습에 등장하지 않는다.
+    `compute_class_weight` 는 존재하는 클래스만 돌려주므로 그대로 쓰면 길이가 어긋난다.
+    없는 클래스는 가중치 1.0 으로 채운다. 학습에 등장하지 않으므로 손실에 기여하지 않는다.
+
+    Returns (weights, missing_classes).
+    """
+    labels = np.asarray(labels)
+    present = np.unique(labels)
+    w = np.ones(num_classes, dtype=np.float64)
+    if len(present) >= 2:
+        cw = compute_class_weight("balanced", classes=present, y=labels)
+        w[present] = cw
+    missing = sorted(set(range(num_classes)) - set(present.tolist()))
+    return w, missing
+
+
 def make_loader(ds, batch_size, shuffle, num_workers, drop_last=False):
     return DataLoader(
         ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,
@@ -108,10 +128,11 @@ def run_training(split_df: pd.DataFrame, cfg: TrainConfig, image_dir=None,
     model = build_model(cfg.model, cfg.num_classes).to(device)
 
     weight_src = split_df if cfg.class_weight_scope == "all" else tr
-    cw = compute_class_weight("balanced",
-                              classes=np.unique(weight_src["label"]),
-                              y=weight_src["label"])
-    criterion = nn.CrossEntropyLoss(weight=torch.tensor(cw, dtype=torch.float, device=device))
+    cw_full, missing = balanced_class_weights(weight_src["label"], cfg.num_classes)
+    if missing:
+        print(f"  [주의] 학습 분할에 없는 클래스 {missing} — 이 fold 에서는 예측될 수 없다.",
+              flush=True)
+    criterion = nn.CrossEntropyLoss(weight=torch.tensor(cw_full, dtype=torch.float, device=device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg.epochs)
     scaler = torch.amp.GradScaler("cuda", enabled=cfg.amp and device.type == "cuda")
