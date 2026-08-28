@@ -84,9 +84,13 @@ def majority_baseline(y_true, class_names) -> dict:
     maj = int(pd.Series(y_true).value_counts().idxmax())
     y_pred = np.full_like(y_true, maj)
     ov = overall_metrics(y_true, y_pred, len(class_names))
+    plain = float((y_pred == y_true).mean())
     return {
         "majority_class": class_names[maj],
-        "accuracy": ov["accuracy"],
+        # 원고 Overall 행과 같은 one-vs-rest micro 척도. 아무것도 안 해도 이만큼 나온다.
+        "accuracy_onevsrest": ov["accuracy"],
+        # 실제로 몇 개를 맞혔는지. 해석은 이쪽으로 해야 한다.
+        "accuracy_plain": plain,
         "micro_sensitivity": ov["sensitivity"],
         **macro_metrics(y_true, y_pred, class_names),
     }

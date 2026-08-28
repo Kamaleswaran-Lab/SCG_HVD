@@ -117,8 +117,11 @@ def main():
                        ["sensitivity", "specificity", "accuracy", "f1_score"]})
           .to_string(index=False))
 
-    base = majority_baseline(load_task(a.task)[0].label.values, class_names)
-    print(f"\n다수 클래스 기준선({base['majority_class']}): 정확도 {base['accuracy']*100:.2f}%")
+    base = majority_baseline(split_df[split_df.split == "test"].label.values, class_names)
+    print(f"\n다수 클래스 기준선({base['majority_class']}), 테스트셋 기준")
+    print(f"  실제 정확도        {base['accuracy_plain']*100:.2f}%")
+    print(f"  one-vs-rest 척도   {base['accuracy_onevsrest']*100:.2f}%  <- 원고 Overall 행과 같은 정의")
+    print(f"  macro-F1           {base['macro_f1']*100:.2f}%")
 
     # R2-M5: Overall 네 지표가 Se 로부터 결정됨을 같이 보인다.
     if len(sm):

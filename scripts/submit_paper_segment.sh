@@ -1,7 +1,8 @@
 #!/bin/bash
 # 논문 세그먼트 단위 재현을 SLURM GPU 노드에 제출한다. 로그인/인터랙티브 노드는 메모리가 부족하다.
 #SBATCH --job-name=scg_paper
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-hp
+#SBATCH --qos=duke_h200_hp
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
@@ -26,7 +27,7 @@ echo "=== $TASK / $MODEL on $(hostname) ==="
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
 $PY -c "import torch;print('cuda',torch.cuda.is_available(),torch.cuda.get_device_name(0))"
 
-srun $PY -W ignore scripts/run_paper_segment.py \
+$PY -W ignore scripts/run_paper_segment.py \
   --task "$TASK" --models "$MODEL" \
   --out "$REPO/out/paper" --num-workers 8
 
