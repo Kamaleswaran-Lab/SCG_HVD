@@ -68,6 +68,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=25)
     ap.add_argument("--num-workers", type=int, default=8)
     ap.add_argument("--out", type=Path, default=Path("out/patient_cv"))
+    ap.add_argument("--save-checkpoint", action="store_true",
+                    help="fold 마다 best 가중치를 저장한다. 해석성 분석(R2-m7)에 쓴다.")
     a = ap.parse_args()
 
     df, class_names = load_task(a.task)
@@ -97,7 +99,8 @@ def main():
 
             cfg = TrainConfig(model=a.model, num_classes=n_classes, epochs=a.epochs,
                               lr=1e-3, num_workers=a.num_workers, seed=seed,
-                              class_weight_scope="train")   # 새 실험은 학습 분할만 사용
+                              class_weight_scope="train",   # 새 실험은 학습 분할만 사용
+                              save_checkpoint=a.save_checkpoint)
             out_dir = root / tag
             _, (y_true, y_pred, y_prob), res = run_training(
                 split_df, cfg,
