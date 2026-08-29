@@ -106,9 +106,14 @@ class FusionDataset(TripleImageDataset):
         return torch.from_numpy(x.T.copy()), ix, iy, iz, torch.tensor(int(row["label"]))
 
 
+#: 파형만 쓰는 모델. 이미지가 필요 없다. 리비전에서 추가한 베이스라인도 여기 속한다.
+WAVEFORM_MODELS = {"1d", "resnet1d", "tcn",
+                   "temporal_matched", "resnet1d_matched", "tcn_matched"}
+
+
 def build_dataset(model_name, df, image_dir=None, **kw):
     """모델 종류에 맞는 Dataset 을 만든다."""
-    if model_name == "1d":
+    if model_name in WAVEFORM_MODELS:
         return SegmentDataset(df)
     if image_dir is None:
         raise ValueError(f"{model_name} 은 image_dir 가 필요하다")

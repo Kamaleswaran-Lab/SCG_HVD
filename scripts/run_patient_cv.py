@@ -39,6 +39,7 @@ from scg_hvd.metrics import (aggregate_to_patient, macro_metrics,  # noqa: E402
                              majority_baseline, metrics_table)
 from scg_hvd.splits import (check_patient_disjoint, patient_cv_folds,  # noqa: E402
                             quantify_overlap_leakage)
+from scg_hvd.datasets import WAVEFORM_MODELS  # noqa: E402
 from scg_hvd.train import TrainConfig, run_training  # noqa: E402
 
 DATA = Path("/work/jkim1/SCG_HVD_data")
@@ -58,7 +59,9 @@ def load_task(task):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
-    ap.add_argument("--model", default="fusion", choices=["1d", "2d", "fusion",
+    ap.add_argument("--model", default="fusion", choices=["1d", "2d", "fusion", "resnet1d", "tcn",
+                                                          "temporal_matched", "resnet1d_matched",
+                                                          "tcn_matched",
                                                           "2d_independent", "fusion_independent"])
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
@@ -98,7 +101,7 @@ def main():
             out_dir = root / tag
             _, (y_true, y_pred, y_prob), res = run_training(
                 split_df, cfg,
-                image_dir=IMAGE_DIRS[a.task] if a.model != "1d" else None,
+                image_dir=None if a.model in WAVEFORM_MODELS else IMAGE_DIRS[a.task],
                 out_dir=out_dir, class_names=class_names, verbose=False)
 
             # 세그먼트 수준

@@ -29,6 +29,7 @@ from scg_hvd.metrics import (majority_baseline, metrics_table,  # noqa: E402
                              overall_metrics_are_dependent)
 from scg_hvd.splits import (check_patient_disjoint, quantify_overlap_leakage,  # noqa: E402
                             segment_split)
+from scg_hvd.datasets import WAVEFORM_MODELS  # noqa: E402
 from scg_hvd.train import TrainConfig, run_training  # noqa: E402
 
 DATA = Path("/work/jkim1/SCG_HVD_data")
@@ -96,7 +97,7 @@ def main():
         )
         out_dir = root / m
         _, (y_true, y_pred, _), res = run_training(
-            split_df, cfg, image_dir=IMAGE_DIRS[a.task] if m != "1d" else None,
+            split_df, cfg, image_dir=None if m in WAVEFORM_MODELS else IMAGE_DIRS[a.task],
             out_dir=out_dir, class_names=class_names,
         )
         tab = metrics_table(y_true, y_pred, class_names)

@@ -68,6 +68,7 @@ class SCGBranch(nn.Module):
     """단일 축 SCG 파형을 100차원으로 인코딩한다."""
 
     def __init__(self, in_channels=1, conv_channels=64, lstm_hidden=100):
+        # 기본값 (64, 100) 이 논문 구성이다. parameter-matched 비교(R1-M6, R2-M4)에서만 키운다.
         super().__init__()
         self.resblock1 = ResidualBlock(in_channels, conv_channels, kernel_size=7, padding=3)
         self.resblock2 = ResidualBlock(conv_channels, conv_channels, kernel_size=5, padding=2)
@@ -88,11 +89,12 @@ class SCGBranch(nn.Module):
 class SCGTrunk1D(nn.Module):
     """세 축을 각각 인코딩해 300차원으로 이어 붙인다. 축 순서는 정본대로 z, x, y이다."""
 
-    def __init__(self):
+    def __init__(self, conv_channels=64, lstm_hidden=100):
         super().__init__()
-        self.branch_x = SCGBranch()
-        self.branch_y = SCGBranch()
-        self.branch_z = SCGBranch()
+        self.lstm_hidden = lstm_hidden
+        self.branch_x = SCGBranch(conv_channels=conv_channels, lstm_hidden=lstm_hidden)
+        self.branch_y = SCGBranch(conv_channels=conv_channels, lstm_hidden=lstm_hidden)
+        self.branch_z = SCGBranch(conv_channels=conv_channels, lstm_hidden=lstm_hidden)
 
     def forward(self, x):
         xz = self.branch_z(x[:, 2:3, :])
@@ -104,11 +106,11 @@ class SCGTrunk1D(nn.Module):
 class HVDNet1D(nn.Module):
     """Temporal Encoder (1D). 원고 Table 2/3의 'Temporal Encoder (1D)' 행."""
 
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, conv_channels=64, lstm_hidden=100):
         super().__init__()
-        self.trunk = SCGTrunk1D()
+        self.trunk = SCGTrunk1D(conv_channels, lstm_hidden)
         self.fc = nn.Sequential(
-            nn.Linear(3 * 100, 128), nn.ReLU(),
+            nn.Linear(3 * lstm_hidden, 128), nn.ReLU(),
             nn.BatchNorm1d(128), nn.Dropout(0.2),
             nn.Linear(128, num_classes),
         )
@@ -276,3 +278,127 @@ def count_parameters(model, trainable_only=True):
     if trainable_only:
         ps = (p for p in model.parameters() if p.requires_grad)
     return sum(p.numel() for p in ps)
+
+
+# ---------------------------------------------------------------- 리비전 추가 베이스라인
+# Referee 1 concern 5 가 요구한 1D ResNet 과 TCN. 원고의 1D 인코더와 같은 입력
+# (3, 2560) 을 받고 같은 학습 경로를 쓴다. `width` 로 파라미터를 맞출 수 있게 해
+# concern 6 의 parameter-matched 비교에도 쓴다.
+
+class _BasicBlock1D(nn.Module):
+    def __init__(self, cin, cout, stride=1):
+        super().__init__()
+        self.c1 = nn.Conv1d(cin, cout, 7, stride=stride, padding=3, bias=False)
+        self.b1 = nn.BatchNorm1d(cout)
+        self.c2 = nn.Conv1d(cout, cout, 7, padding=3, bias=False)
+        self.b2 = nn.BatchNorm1d(cout)
+        self.relu = nn.ReLU(inplace=True)
+        self.down = (nn.Sequential(nn.Conv1d(cin, cout, 1, stride=stride, bias=False),
+                                   nn.BatchNorm1d(cout))
+                     if (stride != 1 or cin != cout) else None)
+
+    def forward(self, x):
+        idt = x if self.down is None else self.down(x)
+        out = self.relu(self.b1(self.c1(x)))
+        out = self.b2(self.c2(out))
+        return self.relu(out + idt)
+
+
+class ResNet1D(nn.Module):
+    """1D ResNet 베이스라인 (R1-M5). 채널 축은 축 3개를 그대로 받는다."""
+
+    def __init__(self, num_classes, width=64, layers=(2, 2, 2, 2), in_channels=3):
+        super().__init__()
+        w = width
+        self.stem = nn.Sequential(
+            nn.Conv1d(in_channels, w, 15, stride=2, padding=7, bias=False),
+            nn.BatchNorm1d(w), nn.ReLU(inplace=True), nn.MaxPool1d(3, stride=2, padding=1))
+        blocks, cin = [], w
+        for i, n in enumerate(layers):
+            cout = w * (2 ** i)
+            for j in range(n):
+                blocks.append(_BasicBlock1D(cin, cout, stride=2 if (j == 0 and i > 0) else 1))
+                cin = cout
+        self.blocks = nn.Sequential(*blocks)
+        self.head = nn.Sequential(nn.AdaptiveAvgPool1d(1), nn.Flatten(),
+                                  nn.Dropout(0.3), nn.Linear(cin, num_classes))
+        self.feat_dim = cin
+
+    def extract_features(self, x):
+        h = self.blocks(self.stem(x))
+        return torch.flatten(nn.functional.adaptive_avg_pool1d(h, 1), 1)
+
+    def forward(self, x):
+        return self.head(self.blocks(self.stem(x)))
+
+
+class _TCNBlock(nn.Module):
+    def __init__(self, cin, cout, k, dilation, dropout=0.2):
+        super().__init__()
+        pad = (k - 1) * dilation
+        self.pad = pad
+        self.c1 = nn.Conv1d(cin, cout, k, padding=pad, dilation=dilation)
+        self.b1 = nn.BatchNorm1d(cout)
+        self.c2 = nn.Conv1d(cout, cout, k, padding=pad, dilation=dilation)
+        self.b2 = nn.BatchNorm1d(cout)
+        self.drop = nn.Dropout(dropout)
+        self.relu = nn.ReLU(inplace=True)
+        self.down = nn.Conv1d(cin, cout, 1) if cin != cout else None
+
+    def _chomp(self, x):
+        return x[:, :, :-self.pad] if self.pad else x
+
+    def forward(self, x):
+        idt = x if self.down is None else self.down(x)
+        out = self.drop(self.relu(self.b1(self._chomp(self.c1(x)))))
+        out = self.drop(self.relu(self.b2(self._chomp(self.c2(out)))))
+        return self.relu(out + idt)
+
+
+class TCN(nn.Module):
+    """Temporal Convolutional Network 베이스라인 (R1-M5). 인과 팽창 합성곱 스택."""
+
+    def __init__(self, num_classes, width=64, levels=6, kernel_size=7, in_channels=3):
+        super().__init__()
+        layers, cin = [], in_channels
+        for i in range(levels):
+            layers.append(_TCNBlock(cin, width, kernel_size, dilation=2 ** i))
+            cin = width
+        self.net = nn.Sequential(*layers)
+        self.head = nn.Sequential(nn.AdaptiveAvgPool1d(1), nn.Flatten(),
+                                  nn.Dropout(0.3), nn.Linear(width, num_classes))
+        self.feat_dim = width
+
+    def extract_features(self, x):
+        return torch.flatten(nn.functional.adaptive_avg_pool1d(self.net(x), 1), 1)
+
+    def forward(self, x):
+        return self.head(self.net(x))
+
+
+MODELS.update({"resnet1d": ResNet1D, "tcn": TCN})
+
+
+# ---------------------------------------------------------------- parameter-matched 구성
+# R1-M6 과 R2-M4 는 "융합 모델이 용량이 커서 좋아진 것 아니냐" 를 묻는다. 아래 세 구성은
+# 융합 모델(4,767,374) 과 파라미터 수를 맞춘 것이며, 동시에 R1-M5 가 요구한 강한 베이스라인
+# 역할을 한다. 용량을 통제했으므로 차이가 나면 아키텍처 차이로 읽을 수 있다.
+
+def temporal_matched(num_classes, **kw):
+    """논문의 1D 인코더를 융합 모델 크기까지 키운 것. R2-M4 의 parameter-matched temporal baseline."""
+    return HVDNet1D(num_classes, conv_channels=208, lstm_hidden=288)
+
+
+def resnet1d_matched(num_classes, **kw):
+    return ResNet1D(num_classes, width=48, layers=(2, 2, 2, 2))
+
+
+def tcn_matched(num_classes, **kw):
+    return TCN(num_classes, width=256, levels=6)
+
+
+MODELS.update({
+    "temporal_matched": temporal_matched,
+    "resnet1d_matched": resnet1d_matched,
+    "tcn_matched": tcn_matched,
+})

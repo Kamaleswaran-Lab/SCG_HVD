@@ -31,7 +31,7 @@ import torch.nn as nn
 from sklearn.utils.class_weight import compute_class_weight
 from torch.utils.data import DataLoader
 
-from .datasets import build_dataset, unpack_batch
+from .datasets import WAVEFORM_MODELS, build_dataset, unpack_batch
 from .models import build_model
 
 
@@ -49,6 +49,7 @@ class TrainConfig:
     class_weight_scope: str = "all"     # "all" = 논문 재현, "train" = 누수 없는 새 실험
     early_stop_patience: int | None = None
     amp: bool = True
+    save_checkpoint: bool = False   # 해석성 분석(R2-m7)에 쓰려면 켠다
 
 
 def balanced_class_weights(labels, num_classes):
@@ -115,7 +116,7 @@ def run_training(split_df: pd.DataFrame, cfg: TrainConfig, image_dir=None,
     va = split_df[split_df.split == "val"]
     te = split_df[split_df.split == "test"]
 
-    ds_kw = {} if cfg.model == "1d" else {"image_norm": cfg.image_norm}
+    ds_kw = {} if cfg.model in WAVEFORM_MODELS else {"image_norm": cfg.image_norm}
     train_ds = build_dataset(cfg.model, tr, image_dir, **ds_kw)
     val_ds = build_dataset(cfg.model, va, image_dir, **ds_kw)
     test_ds = build_dataset(cfg.model, te, image_dir, **ds_kw)
@@ -203,6 +204,8 @@ def run_training(split_df: pd.DataFrame, cfg: TrainConfig, image_dir=None,
 
     if out_dir:
         out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
+        if cfg.save_checkpoint and best_state is not None:
+            torch.save(best_state, out_dir / "model.pt")
         pd.DataFrame(log).to_csv(out_dir / "training_log.csv", index=False)
         pred = pd.DataFrame({
             "segment_id": te.segment_id.values if "segment_id" in te else np.arange(len(te)),
