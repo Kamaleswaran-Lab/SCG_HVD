@@ -22,3 +22,6 @@ data/processed/
 
 # OS
 .DS_Store
+
+# 실험 산출물 — 재생성 가능하고 실행 중 계속 바뀐다
+out/
