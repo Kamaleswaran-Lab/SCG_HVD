@@ -47,16 +47,61 @@ PARAMS = {"1d": 526_740, "2d": 4_203_263, "fusion": 4_767_374,
           "tcn_matched": 5_063_173}
 
 
+def rebuild_from_folds(seed_dir: Path):
+    """fold_summary.csv 가 없을 때 fold 디렉터리에서 되살린다.
+
+    `fold_summary.csv` 와 `all_patient_predictions.csv` 는 **모든 fold 가 끝난 뒤에만** 쓰인다.
+    배열 잡이 시간 제한에 걸리면 이미 끝난 fold 의 결과까지 통째로 잃게 된다. 각 fold 는
+    `predictions.csv` 와 `patient_predictions.csv` 를 자기 디렉터리에 남기므로, 그것으로
+    같은 표를 다시 만든다.
+    """
+    import re as _re
+    from scg_hvd.metrics import macro_metrics as _macro, majority_baseline as _maj
+
+    rows, pats = [], []
+    for fd in sorted(seed_dir.glob("seed*_fold*")):
+        pf, sf = fd / "patient_predictions.csv", fd / "predictions.csv"
+        if not (pf.exists() and sf.exists()):
+            continue
+        m = _re.search(r"seed(\d+)_fold(\d+)", fd.name)
+        seed, fold = int(m.group(1)), int(m.group(2))
+        seg = pd.read_csv(sf); pat = pd.read_csv(pf)
+        n_cls = sum(c.startswith("prob_") for c in seg.columns)
+        cn = [str(i) for i in range(n_cls)]
+        rows.append({
+            "seed": seed, "fold": fold,
+            "n_test_patients": len(pat), "n_test_segments": len(seg),
+            "segment_accuracy": float((seg.y_pred == seg.y_true).mean()),
+            "segment_macro_f1": _macro(seg.y_true.values, seg.y_pred.values, cn)["macro_f1"],
+            "patient_accuracy": float((pat.y_pred == pat.y_true).mean()),
+            "patient_macro_f1": _macro(pat.y_true.values, pat.y_pred.values, cn)["macro_f1"],
+            "majority_accuracy": _maj(pat.y_true.values, cn)["accuracy_plain"],
+        })
+        pats.append(pat.assign(seed=seed, fold=fold))
+    if not rows:
+        return None, None
+    return pd.DataFrame(rows), (pd.concat(pats, ignore_index=True) if pats else None)
+
+
 def collect(root: Path, task: str, model: str):
     base = root / task / model
-    folds, pats, names = [], [], None
+    folds, pats, names, rebuilt = [], [], None, []
     for d in sorted(base.glob("seed*")):
         if (d / "fold_summary.csv").exists():
             folds.append(pd.read_csv(d / "fold_summary.csv"))
-        if (d / "all_patient_predictions.csv").exists():
-            pats.append(pd.read_csv(d / "all_patient_predictions.csv"))
+            if (d / "all_patient_predictions.csv").exists():
+                pats.append(pd.read_csv(d / "all_patient_predictions.csv"))
+        else:
+            # 잡이 아직 끝나지 않았거나 중단됐다. 남아 있는 fold 로 복구한다.
+            f, p = rebuild_from_folds(d)
+            if f is not None:
+                folds.append(f); rebuilt.append(f"{d.name}({len(f)} fold)")
+                if p is not None:
+                    pats.append(p)
         if names is None and (d / "config.json").exists():
             names = json.loads((d / "config.json").read_text()).get("class_names")
+    if rebuilt:
+        print(f"  [부분 복구] {model}: {', '.join(rebuilt)}")
     if not folds:
         return None
     return {"folds": pd.concat(folds, ignore_index=True),
