@@ -26,7 +26,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scg_hvd.metrics import majority_baseline, mcnemar_paired, metrics_table  # noqa: E402
 
-MODELS = ["1d", "2d", "fusion"]
+MODELS = ["1d", "2d", "fusion",
+          "temporal_matched", "resnet1d_matched", "tcn_matched"]
+
+
+def class_names_for(root: Path, task: str, model: str):
+    """어느 시드 디렉터리에서든 클래스 이름을 읽는다. 없으면 정수 라벨로 떨어진다."""
+    import json
+    for d in sorted((root / task / model).glob("seed*")):
+        f = d / "config.json"
+        if f.exists():
+            try:
+                return json.loads(f.read_text())["class_names"]
+            except Exception:
+                pass
+    return None
 
 
 def collect(root: Path, task: str, model: str):
@@ -96,27 +110,35 @@ def main():
     for i in range(len(avail)):
         for j in range(i + 1, len(avail)):
             A, B = avail[i], avail[j]
-            a_df = preds[A].sort_values(["seed", "fold", "patient_id"]).reset_index(drop=True)
-            b_df = preds[B].sort_values(["seed", "fold", "patient_id"]).reset_index(drop=True)
-            if len(a_df) != len(b_df) or not (a_df.patient_id.values == b_df.patient_id.values).all():
-                print(f"  {A} vs {B}: 예측 짝이 맞지 않아 건너뛴다")
+            # 두 구성이 공통으로 가진 (seed, fold, patient) 에서만 비교한다.
+            # 시드 수가 다르면 전체를 버리는 대신 겹치는 부분만 쓴다.
+            key = ["seed", "fold", "patient_id"]
+            a_df = preds[A].drop_duplicates(key).set_index(key)
+            b_df = preds[B].drop_duplicates(key).set_index(key)
+            common = a_df.index.intersection(b_df.index)
+            if len(common) < 10:
+                print(f"  {A} vs {B}: 공통 예측이 {len(common)}개뿐이라 건너뛴다")
                 continue
-            r = mcnemar_paired(a_df.y_true.values, a_df.y_pred.values, b_df.y_pred.values)
-            print(f"  {A:7s} vs {B:7s}  acc {r['accuracy_a']:.4f} vs {r['accuracy_b']:.4f} | "
-                  f"불일치 {r['n_discordant']:3d} ({r['n_a_only_correct']}/{r['n_b_only_correct']}) | "
+            a_c, b_c = a_df.loc[common], b_df.loc[common]
+            assert (a_c.y_true.values == b_c.y_true.values).all(), "라벨이 어긋난다"
+            r = mcnemar_paired(a_c.y_true.values, a_c.y_pred.values, b_c.y_pred.values)
+            n_seed = len(set(i[0] for i in common))
+            print(f"  {A:16s} vs {B:16s}  acc {r['accuracy_a']:.4f} vs {r['accuracy_b']:.4f} | "
+                  f"n={len(common)} ({n_seed} seed) | 불일치 {r['n_discordant']:3d} "
+                  f"({r['n_a_only_correct']}/{r['n_b_only_correct']}) | "
                   f"p={r['p_value']:.4f}" + ("  <== 유의" if r["p_value"] < 0.05 else ""))
 
     # pooled 환자 단위 클래스별 표
     for m in avail:
         p = preds[m]
-        names = sorted(pd.read_json(a.out / a.task / m / "seed0" / "config.json",
-                                    typ="series")["class_names"]) if False else None
+        cn = class_names_for(a.out, a.task, m)
+        n_cls = len(cn) if cn else int(max(p.y_true.max(), p.y_pred.max())) + 1
+        names = cn if cn else [str(i) for i in range(n_cls)]
         print(f"\n--- {m}: pooled 환자 단위 ({len(p)} 예측) ---")
-        n_cls = int(max(p.y_true.max(), p.y_pred.max())) + 1
-        t = metrics_table(p.y_true.values, p.y_pred.values, [str(i) for i in range(n_cls)])
+        t = metrics_table(p.y_true.values, p.y_pred.values, names)
         print(t[["class_name", "sensitivity", "specificity", "f1_score", "support"]]
               .to_string(index=False, float_format=lambda v: f"{v*100:.2f}"))
-        b = majority_baseline(p.y_true.values, [str(i) for i in range(n_cls)])
+        b = majority_baseline(p.y_true.values, names)
         print(f"    다수 클래스 기준선 정확도 {b['accuracy_plain']:.4f} | macro-F1 {b['macro_f1']:.4f}")
 
     print(f"\n결과: {a.out / (a.task + '_summary.csv')}")
