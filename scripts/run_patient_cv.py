@@ -46,8 +46,22 @@ DATA = Path("/work/jkim1/SCG_HVD_data")
 IMAGE_DIRS = {"task1": DATA / "Task1_images", "task2": DATA / "Task2_images"}
 
 
-def load_task(task):
+def drop_overlap(df: pd.DataFrame) -> pd.DataFrame:
+    """겹치지 않는 창만 남긴다 (R2-M1 이 요구한 non-overlapping 보조 분석).
+
+    창 10초 / 이동 5초이므로 짝수 인덱스 세그먼트만 취하면 환자 내 시작 시각 간격이 정확히
+    10.0초가 되어 겹침이 사라진다. 검증: Task I 8678 -> 4365, 5초 이웃쌍 0, 클래스별 환자 수 불변.
+    """
+    idx = df.segment_id.str.extract(r"_seg(\d+)$")[0].astype(int)
+    return df[idx % 2 == 0].reset_index(drop=True)
+
+
+def load_task(task, nonoverlap=False):
     df = pd.read_csv(DATA / "meta" / f"segment_metadata_{task}.csv")
+    if nonoverlap:
+        n0 = len(df)
+        df = drop_overlap(df)
+        print(f"  [non-overlapping] 세그먼트 {n0} -> {len(df)}", flush=True)
     names = sorted(df.label.unique())
     df["label_name"] = df["label"]
     df["label"] = df["label"].map({n: i for i, n in enumerate(names)})
@@ -68,11 +82,13 @@ def main():
     ap.add_argument("--epochs", type=int, default=25)
     ap.add_argument("--num-workers", type=int, default=8)
     ap.add_argument("--out", type=Path, default=Path("out/patient_cv"))
+    ap.add_argument("--nonoverlap", action="store_true",
+                    help="겹치지 않는 창만 사용한다 (R2-M1 보조 분석).")
     ap.add_argument("--save-checkpoint", action="store_true",
                     help="fold 마다 best 가중치를 저장한다. 해석성 분석(R2-m7)에 쓴다.")
     a = ap.parse_args()
 
-    df, class_names = load_task(a.task)
+    df, class_names = load_task(a.task, nonoverlap=a.nonoverlap)
     n_classes = len(class_names)
     # 시드 하나만 돌릴 때는 출력 경로에 시드를 넣는다. 배열 잡으로 병렬 실행해도 덮어쓰지 않는다.
     root = a.out / a.task / a.model
@@ -80,7 +96,8 @@ def main():
         root = root / f"seed{a.seeds[0]}"
     root.mkdir(parents=True, exist_ok=True)
 
-    print(f"===== {a.task} / {a.model} | {a.folds}-fold x {len(a.seeds)} seed =====")
+    tag_no = " | non-overlapping windows" if a.nonoverlap else ""
+    print(f"===== {a.task} / {a.model} | {a.folds}-fold x {len(a.seeds)} seed{tag_no} =====")
     print(f"  세그먼트 {len(df)}, 환자 {df.patient_id.nunique()}, 클래스 {class_names}\n", flush=True)
 
     seg_rows, pat_rows, fold_summ = [], [], []
