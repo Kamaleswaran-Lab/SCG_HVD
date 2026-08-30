@@ -124,6 +124,23 @@ class HVDNet1D(nn.Module):
 
 # ---------------------------------------------------------------- 2D 구성요소
 
+
+def _feature_dim(backbone) -> int:
+    """백본이 실제로 내놓는 차원을 순전파로 잰다.
+
+    `num_features` 속성을 믿으면 안 된다. timm 의 MobileNetV3 는 `num_features` 가 960 이지만
+    `num_classes=0` 으로 만들면 conv_head 를 거쳐 1280 을 내놓는다. 속성값으로 투영층을 만들면
+    형상 불일치로 터진다. EfficientNet-B0 에서는 둘이 같아 논문 구성에서는 드러나지 않았다.
+    """
+    import torch as _t
+    was_training = backbone.training
+    backbone.eval()
+    with _t.no_grad():
+        d = int(backbone(_t.zeros(1, 3, 224, 224)).shape[1])
+    backbone.train(was_training)
+    return d
+
+
 class EfficientNetProjector(nn.Module):
     """축 하나의 스칼로그램을 out_dim 으로 투영한다. Independent 계열에서 축마다 하나씩 쓴다."""
 
@@ -131,7 +148,7 @@ class EfficientNetProjector(nn.Module):
         super().__init__()
         self.backbone = timm.create_model(model_name, pretrained=True, num_classes=0, drop_rate=0.2)
         self.proj = nn.Sequential(
-            nn.Linear(self.backbone.num_features, out_dim),
+            nn.Linear(_feature_dim(self.backbone), out_dim),
             nn.ReLU(inplace=True),
             nn.Dropout(0.3),
         )
@@ -149,9 +166,10 @@ class _SharedImageTrunk(nn.Module):
             model_name, pretrained=True, num_classes=0, drop_rate=0.2
         )
         d = out_dim // 3
-        self.proj_x = nn.Linear(self.shared_backbone.num_features, d)
-        self.proj_y = nn.Linear(self.shared_backbone.num_features, d)
-        self.proj_z = nn.Linear(self.shared_backbone.num_features, d)
+        feat = _feature_dim(self.shared_backbone)
+        self.proj_x = nn.Linear(feat, d)
+        self.proj_y = nn.Linear(feat, d)
+        self.proj_z = nn.Linear(feat, d)
         self.out_features = d * 3
 
     def forward(self, ix, iy, iz):
@@ -402,3 +420,35 @@ MODELS.update({
     "resnet1d_matched": resnet1d_matched,
     "tcn_matched": tcn_matched,
 })
+
+
+# ---------------------------------------------------------------- 2D 백본 교체 ablation
+# R2-M4 가 요구한 ablation 이자, 논문의 주장을 직접 지지하는 실험이다.
+# 주장은 "우리 아키텍처가 다른 아키텍처보다 낫다" 가 아니라 "시간 인코더에 스펙트로템포럴
+# 브랜치를 더하면 좋아진다" 이므로, 2D 백본을 바꿔 가며 그 이득이 백본 선택에 의존하지 않음을
+# 보이는 편이 standalone 베이스라인과 경쟁하는 것보다 주장에 맞는다.
+
+def _fusion_with(backbone):
+    def f(num_classes, **kw):
+        return FusionShared(num_classes, model_name=backbone)
+    f.__name__ = f"fusion_{backbone}"
+    return f
+
+
+def _image_with(backbone):
+    def f(num_classes, **kw):
+        return Image2DShared(num_classes, model_name=backbone)
+    f.__name__ = f"2d_{backbone}"
+    return f
+
+
+#: 교체해 볼 2D 백본. EfficientNet-B0 이 논문 구성이다.
+ABLATION_BACKBONES = {
+    "resnet18": "resnet18",
+    "mobilenet": "mobilenetv3_large_100",
+    "densenet": "densenet121",
+}
+
+for _alias, _name in ABLATION_BACKBONES.items():
+    MODELS[f"fusion_{_alias}"] = _fusion_with(_name)
+    MODELS[f"2d_{_alias}"] = _image_with(_name)

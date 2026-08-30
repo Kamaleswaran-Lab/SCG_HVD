@@ -40,6 +40,7 @@ from scg_hvd.metrics import (aggregate_to_patient, macro_metrics,  # noqa: E402
 from scg_hvd.splits import (check_patient_disjoint, patient_cv_folds,  # noqa: E402
                             quantify_overlap_leakage)
 from scg_hvd.datasets import WAVEFORM_MODELS  # noqa: E402
+from scg_hvd.models import MODELS  # noqa: E402
 from scg_hvd.train import TrainConfig, run_training  # noqa: E402
 
 DATA = Path("/work/jkim1/SCG_HVD_data")
@@ -73,10 +74,8 @@ def load_task(task, nonoverlap=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
-    ap.add_argument("--model", default="fusion", choices=["1d", "2d", "fusion", "resnet1d", "tcn",
-                                                          "temporal_matched", "resnet1d_matched",
-                                                          "tcn_matched",
-                                                          "2d_independent", "fusion_independent"])
+    ap.add_argument("--model", default="fusion", choices=sorted(MODELS),
+                    help="scg_hvd.models.MODELS 에 등록된 이름. 목록을 별도로 관리하면 새 모델을 추가할 때마다 어긋난다.")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0])
     ap.add_argument("--epochs", type=int, default=25)
