@@ -42,7 +42,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.paths import data_root, localise  # noqa: E402
+from scg_hvd.paths import data_root, localize  # noqa: E402
 
 from scg_hvd.datasets import select_scg_channels  # noqa: E402
 from scg_hvd.models import build_model  # noqa: E402
@@ -83,8 +83,10 @@ def r_peaks(sig_1d, fs=FS):
     nyq = fs / 2
     b, a = sps.butter(3, [5 / nyq, 15 / nyq], btype="band")
     f = sps.filtfilt(b, a, x)
-    integ = np.convolve(np.diff(f, prepend=f[0]) ** 2, np.ones(int(.15 * fs)) / int(.15 * fs), "same")
-    pk, _ = sps.find_peaks(integ, height=np.mean(integ) + .5 * np.std(integ), distance=int(.25 * fs))
+    window = np.ones(int(.15 * fs)) / int(.15 * fs)
+    integ = np.convolve(np.diff(f, prepend=f[0]) ** 2, window, "same")
+    pk, _ = sps.find_peaks(integ, height=np.mean(integ) + .5 * np.std(integ),
+                           distance=int(.25 * fs))
     return pk
 
 
@@ -109,6 +111,13 @@ class GradCAM2D:
             lambda m, gi, go: setattr(self, "grad", go[0]))
 
     def __call__(self, inputs, class_idx=None):
+        # cuDNN refuses to run RNN backward on a module in eval mode, and the temporal branch
+        # has an LSTM. Falling back to the native implementation for this pass keeps the model
+        # in eval mode, which is the model whose attributions we want.
+        with torch.backends.cudnn.flags(enabled=False):
+            return self._forward_backward(inputs, class_idx)
+
+    def _forward_backward(self, inputs, class_idx):
         self.model.zero_grad()
         out = self.model(*inputs)
         # The index has to live on the same device as `out`; a CPU index against a CUDA
@@ -129,7 +138,7 @@ def load_task(task):
     names = sorted(df.label.unique())
     df["label_name"] = df["label"]
     df["label"] = df["label"].map({n: i for i, n in enumerate(names)})
-    df["filepath"] = localise(df["filepath"], DATA)
+    df["filepath"] = localize(df["filepath"], DATA)
     return df, names
 
 
@@ -204,7 +213,8 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
             stem = Path(r.filepath).stem
             base = image_dir / r.label_name
             try:
-                ims = [tf(Image.open(base / f"{stem}_{ax}.png").convert("RGB")).unsqueeze(0).to(device)
+                ims = [tf(Image.open(base / f"{stem}_{ax}.png").convert("RGB"))
+                       .unsqueeze(0).to(device)
                        for ax in ("x", "y", "z")]
                 sig = np.load(r.filepath).astype(np.float32)
                 sig = select_scg_channels(sig)
@@ -228,7 +238,7 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
         ax.set_xlabel("time within window")
         ax.set_xticks([]); ax.set_yticks([])
     axes[0].set_ylabel("CWT scale\n(low freq. at top)")
-    fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalised)")
+    fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalized)")
     fig.suptitle("Grad-CAM on the shared image backbone, averaged within class", fontsize=11)
     png = out / "task1_fusion_gradcam.png"
     fig.savefig(png, dpi=200, bbox_inches="tight")
@@ -299,7 +309,8 @@ def main():
             pk = r_peaks(raw[:, ecg_idx].astype(np.float64))
             for ax, key in zip(AXIS_ORDER, ("branch_z", "branch_x", "branch_y")):
                 w = rec.weights[key][0].numpy()
-                rows.append({"class": cls, "axis": ax, "entropy": float(-(w * np.log(w + 1e-12)).sum()),
+                rows.append({"class": cls, "axis": ax,
+                             "entropy": float(-(w * np.log(w + 1e-12)).sum()),
                              "peak_pos_sec": float(np.argmax(w) / FS),
                              "top10pct_mass": float(np.sort(w)[-len(w) // 10:].sum())})
                 if len(pk) >= 3:

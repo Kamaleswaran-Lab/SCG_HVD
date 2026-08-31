@@ -40,7 +40,7 @@ def data_root(required=True) -> Path:
     return p
 
 
-def localise(paths, root=None):
+def localize(paths, root=None):
     """Rewrite the absolute paths in the segment index onto the local data root.
 
     The index files ship with the absolute paths of the machine that built them. Rather than

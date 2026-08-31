@@ -9,23 +9,20 @@ transform scalograms of the same signal.
 
 ## What this repository is for
 
-It reproduces every number in the paper, and it contains the analyses that went into the
-revision — including the ones whose results are not in the paper. If you want to check whether
-a reported figure holds, the code that produced it is here, and so is the code that produced
-the figures we chose not to report.
+It reproduces every number in the paper. It also contains the analyses that went into the
+revision, including the ones whose results are not reported.
 
-Two things are worth knowing before reading any result.
+Two things to know before reading any result.
 
-**The headline number depends entirely on how the data is split.** Under the segment-level
-split used in earlier work on these datasets, the fused model reaches 99.63% accuracy on Task
-I. Under a patient-level split it reaches 65.3%. Both are in the paper. The first is not a
-generalization estimate: windows are 10 s long on a 5 s stride, so 98.96% of test segments
-share five seconds of raw signal with a training segment, and no patient is held out at all.
-`scg_hvd/splits.quantify_overlap_leakage()` measures this so you do not have to take our word
-for it.
+**The headline number depends on how the data is split.** Under the segment-level split used
+in earlier work on these datasets, the fused model reaches 99.63% accuracy on Task I. Under a
+patient-level split it reaches 65.3%. Both are in the paper. The first is not a generalization
+estimate: windows are 10 s long on a 5 s stride, so 98.96% of test segments share five seconds
+of raw signal with a training segment, and no patient is held out.
+`scg_hvd/splits.quantify_overlap_leakage()` recomputes that figure.
 
 **The claim is narrow.** It is that adding a spectrotemporal branch to a temporal SCG encoder
-improves it — not that this architecture beats other sequence models. The ablation that tests
+improves it, not that this architecture beats other sequence models. The ablation that tests
 it holds the temporal branch fixed and varies the image backbone.
 
 ## Layout
@@ -51,7 +48,7 @@ with Korean comments.
     meta/                          df_metadata.csv and the segment index files
 
 The index files carry the absolute paths of the machine that built them;
-`scg_hvd.paths.localise` rewrites them onto your root by matching the `Task1/` or `Task2/`
+`scg_hvd.paths.localize` rewrites them onto your root by matching the `Task1/` or `Task2/`
 component, so they do not need editing.
 
 The datasets themselves are not redistributed here. They come from
@@ -77,10 +74,11 @@ Collecting results and building the figures:
     python analysis/final_report.py --task task1
     python analysis/make_figures.py --out out/figures
 
-The `scripts/submit_*.sh` files are SLURM array jobs for the same entry points. Their
-partition and QoS lines are specific to the cluster this ran on; change those two lines and
-they should work elsewhere. Repository root and interpreter come from `SCG_HVD_REPO` and
-`SCG_HVD_PYTHON`, both of which have sensible defaults.
+The `scripts/submit_*.sh` files are SLURM array jobs wrapping the same entry points. The
+`--partition` and `--qos` lines are specific to the cluster this ran on and will need
+changing. `SCG_HVD_REPO` and `SCG_HVD_PYTHON` override the repository root and the
+interpreter; without them the scripts use `$SLURM_SUBMIT_DIR` and whatever `python` resolves
+to on the node.
 
 ## The analyses behind the revision
 
@@ -95,18 +93,18 @@ they should work elsewhere. Repository root and interpreter come from `SCG_HVD_R
 | `analysis/interpretability.py` | Attention weights over the cardiac cycle, Grad-CAM |
 | `analysis/compare_to_manuscript.py` | Reproduction against all 120 published cells |
 
-## Things we found and did not hide
+## Errors in the published description
 
-The audit that preceded this revision turned up several errors in our own published
-description. They are corrected in the revised manuscript and documented in the code:
+Auditing the original code for this revision turned up four places where the paper described
+something other than what ran. All four are corrected in the revised manuscript:
 
 - The paper described three independent image backbones. The code that produced every reported
   number uses one backbone shared across the three axes, which is a third of the parameters.
   See `scg_hvd/models.py`.
-- The paper described a complex Morlet wavelet over 1–30 Hz, power scalograms and an RGB
-  colormap. The implementation uses a real Morlet wavelet over scales 1–128 (1.63–208 Hz),
+- The paper described a complex Morlet wavelet over 1-30 Hz, power scalograms and an RGB
+  colormap. The implementation uses a real Morlet wavelet over scales 1-128 (1.63-208 Hz),
   magnitude, and grayscale.
-- The archived pipeline recovered metrics by multiplying normalised confusion matrices back
+- The archived pipeline recovered metrics by multiplying normalized confusion matrices back
   through a hard-coded support. Seventeen of the 120 published cells disagree in the second
   decimal place as a result. `scg_hvd/metrics.py` computes everything from raw predictions.
 - The archived LOOCV harness chose validation patients using the test patient's label.
@@ -114,7 +112,7 @@ description. They are corrected in the revised manuscript and documented in the 
 
 ## Citing
 
-Please cite the paper. A `CITATION.cff` will be added once the DOI is assigned.
+Cite the paper. A `CITATION.cff` will follow once the DOI is assigned.
 
 ## License
 

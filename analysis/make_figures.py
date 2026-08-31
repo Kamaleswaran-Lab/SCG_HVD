@@ -39,7 +39,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from analysis.final_report import LABEL, collect  # noqa: E402
+from analysis.final_report import collect  # noqa: E402
 
 # Colour by role: the proposed configuration saturated, everything else neutral.
 C_PROPOSED = "#1f5fa9"
@@ -151,7 +151,8 @@ def fig_overlap(ov_root: Path, no_root: Path, out: Path):
 
 def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
     """FigR3: does the image-to-fusion gain recur across backbones? The paper rests on this."""
-    pairs = [("efficientnet_b0", collect(cv_root, "task1", "2d"), collect(cv_root, "task1", "fusion"))]
+    pairs = [("efficientnet_b0",
+              collect(cv_root, "task1", "2d"), collect(cv_root, "task1", "fusion"))]
     for bb in ("resnet18", "mobilenet", "densenet"):
         a, b = collect(bb_root, "task1", f"2d_{bb}"), collect(bb_root, "task1", f"fusion_{bb}")
         if a and b:
@@ -274,7 +275,9 @@ def main():
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
-    cv, no, bb = Path("out/patient_cv"), Path("out/patient_cv_nonoverlap"), Path("out/backbone_ablation")
+    cv = Path("out/patient_cv")
+    no = Path("out/patient_cv_nonoverlap")
+    bb = Path("out/backbone_ablation")
     interp = Path("out/interp")
     made = []
     for fn, args, name in (

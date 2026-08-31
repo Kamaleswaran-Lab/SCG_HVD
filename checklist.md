@@ -4,11 +4,11 @@ Goal: `SCG_HVD` can be handed to a reviewer or a stranger and read without us in
 
 ## Comments and docstrings to English
 
-- [x] `scg_hvd/` — datasets, metrics, models, splits, train
-- [x] `analysis/` — 10 files
-- [x] `scripts/` — 3 Python, 7 SLURM
+- [x] `scg_hvd/`  -  datasets, metrics, models, splits, train
+- [x] `analysis/`  -  10 files
+- [x] `scripts/`  -  3 Python, 7 SLURM
 - [x] `archive/README.md`
-- [x] `archive/_canonical/*.py` — **deliberately left as found.** These are verbatim copies
+- [x] `archive/_canonical/*.py`  -  **deliberately left as found.** These are verbatim copies
       whose md5 sums are recorded; editing a comment would break that provenance.
 
 ## Portability
@@ -19,7 +19,7 @@ Goal: `SCG_HVD` can be handed to a reviewer or a stranger and read without us in
 
 ## Repository furniture
 
-- [x] `README.md` — what this is, how to run it, what each result corresponds to
+- [x] `README.md`  -  what this is, how to run it, what each result corresponds to
 - [x] `LICENSE`
 - [x] Drop the two empty directories, or give them a reason to exist
 

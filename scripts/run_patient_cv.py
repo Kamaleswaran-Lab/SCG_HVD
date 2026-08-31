@@ -32,7 +32,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.paths import data_root, localise  # noqa: E402
+from scg_hvd.paths import data_root, localize  # noqa: E402
 
 from scg_hvd.metrics import (aggregate_to_patient, macro_metrics,  # noqa: E402
                              majority_baseline, metrics_table)
@@ -66,7 +66,7 @@ def load_task(task, nonoverlap=False):
     names = sorted(df.label.unique())
     df["label_name"] = df["label"]
     df["label"] = df["label"].map({n: i for i, n in enumerate(names)})
-    df["filepath"] = localise(df["filepath"], DATA)
+    df["filepath"] = localize(df["filepath"], DATA)
     return df, names
 
 
@@ -172,7 +172,7 @@ def main():
                 "patient_macro_f1", "majority_accuracy"]:
         m, s = fs[col].mean(), fs[col].std()
         lo, hi = m - 1.96 * s / np.sqrt(len(fs)), m + 1.96 * s / np.sqrt(len(fs))
-        print(f"  {col:20s} {m:.4f} ± {s:.4f}   95% CI [{lo:.4f}, {hi:.4f}]")
+        print(f"  {col:20s} {m:.4f} +/- {s:.4f}   95% CI [{lo:.4f}, {hi:.4f}]")
 
     # patient-level results pooled over every fold
     allp = pd.concat(pat_rows)

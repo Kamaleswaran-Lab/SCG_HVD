@@ -92,7 +92,7 @@ def main():
         r = {"model": m, "n_runs": len(f)}
         for c in cols:
             mu, sd, lo, hi = ci(f[c])
-            r[c] = f"{mu:.4f} ± {sd:.4f}"
+            r[c] = f"{mu:.4f} +/- {sd:.4f}"
             r[c + "_ci"] = f"[{lo:.4f}, {hi:.4f}]"
         rows.append(r)
     tab = pd.DataFrame(rows)

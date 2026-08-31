@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -36,7 +37,9 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.metrics import majority_baseline, mcnemar_paired, metrics_table  # noqa: E402
+from scg_hvd.metrics import (  # noqa: E402
+    macro_metrics, majority_baseline, mcnemar_paired, metrics_table,
+)
 
 ORDER = ["1d", "2d", "fusion", "temporal_matched", "resnet1d_matched", "tcn_matched"]
 LABEL = {
@@ -60,15 +63,12 @@ def rebuild_from_folds(seed_dir: Path):
     with the ones that did not. Each fold leaves its own `predictions.csv` and
     `patient_predictions.csv` behind, which is enough to reconstruct the same table.
     """
-    import re as _re
-    from scg_hvd.metrics import macro_metrics as _macro, majority_baseline as _maj
-
     rows, pats = [], []
     for fd in sorted(seed_dir.glob("seed*_fold*")):
         pf, sf = fd / "patient_predictions.csv", fd / "predictions.csv"
         if not (pf.exists() and sf.exists()):
             continue
-        m = _re.search(r"seed(\d+)_fold(\d+)", fd.name)
+        m = re.search(r"seed(\d+)_fold(\d+)", fd.name)
         seed, fold = int(m.group(1)), int(m.group(2))
         seg = pd.read_csv(sf); pat = pd.read_csv(pf)
         n_cls = sum(c.startswith("prob_") for c in seg.columns)
@@ -77,10 +77,10 @@ def rebuild_from_folds(seed_dir: Path):
             "seed": seed, "fold": fold,
             "n_test_patients": len(pat), "n_test_segments": len(seg),
             "segment_accuracy": float((seg.y_pred == seg.y_true).mean()),
-            "segment_macro_f1": _macro(seg.y_true.values, seg.y_pred.values, cn)["macro_f1"],
+            "segment_macro_f1": macro_metrics(seg.y_true.values, seg.y_pred.values, cn)["macro_f1"],
             "patient_accuracy": float((pat.y_pred == pat.y_true).mean()),
-            "patient_macro_f1": _macro(pat.y_true.values, pat.y_pred.values, cn)["macro_f1"],
-            "majority_accuracy": _maj(pat.y_true.values, cn)["accuracy_plain"],
+            "patient_macro_f1": macro_metrics(pat.y_true.values, pat.y_pred.values, cn)["macro_f1"],
+            "majority_accuracy": majority_baseline(pat.y_true.values, cn)["accuracy_plain"],
         })
         pats.append(pat.assign(seed=seed, fold=fold))
     if not rows:
@@ -205,10 +205,12 @@ def main():
                 continue
             ca, cb = da.loc[common], db.loc[common]
             r = mcnemar_paired(ca.y_true.values, ca.y_pred.values, cb.y_pred.values)
-            mc.append({"a": A, "b": B, "n": len(common), "seeds": len(set(k[0] for k in common)), **r})
+            mc.append({"a": A, "b": B, "n": len(common),
+                       "seeds": len(set(k[0] for k in common)), **r})
             flag = "  <== significant" if r["p_value"] < 0.05 else ""
             print(f"  {LABEL[A]:34s} vs {LABEL[B]:34s} "
-                  f"{r['accuracy_a']:.3f}/{r['accuracy_b']:.3f} n={len(common):3d} p={r['p_value']:.4f}{flag}")
+                  f"{r['accuracy_a']:.3f}/{r['accuracy_b']:.3f} n={len(common):3d} "
+                  f"p={r['p_value']:.4f}{flag}")
     if mc:
         pd.DataFrame(mc).to_csv(a.out / f"{a.task}_mcnemar.csv", index=False)
 
@@ -221,9 +223,10 @@ def main():
 
     # ---- LaTeX ----
     lines = ["\\begin{table}[ht]", "\\centering", "\\begin{threeparttable}",
-             f"\\caption{{\\rev{{Patient-level cross-validation for {'Task~I' if a.task=='task1' else 'Task~II'}. "
-             "Mean $\\pm$ SD over folds, with 95\\% confidence intervals computed across folds rather "
-             "than across segments. Baselines are shown for reference.}}}",
+             f"\\caption{{\\rev{{Patient-level cross-validation for "
+             f"{'Task~I' if a.task == 'task1' else 'Task~II'}. "
+             "Mean $\\pm$ SD over folds, with 95\\% confidence intervals computed across "
+             "folds rather than across segments. Baselines are shown for reference.}}",
              f"\\label{{tbl:patientcv_{a.task}}}", "\\renewcommand{\\arraystretch}{1.2}",
              "\\setlength{\\tabcolsep}{5pt}", "\\footnotesize",
              "\\begin{tabular}{l|c|c|c}", "\\hline\\hline",
@@ -240,8 +243,10 @@ def main():
         lines.append(f"Covariates only (age, sex, HR) & -- & {cov['accuracy']*100:.1f} & "
                      f"{cov['macro_f1']:.3f} \\\\")
     lines += ["\\hline\\hline", "\\end{tabular}", "\\begin{tablenotes}[flushleft]\\footnotesize",
-              "\\item No patient contributes segments to more than one split in any fold, and no test "
-              "segment has an overlapping neighbour in training or validation; both are asserted in "
+              "\\item No patient contributes segments to more than one split in any fold, and "
+              "no test "
+              "segment has an overlapping neighbour in training or validation; both are "
+              "asserted in "
               "the released code.",
               "\\end{tablenotes}", "\\end{threeparttable}", "\\end{table}"]
     (a.out / f"{a.task}_table.tex").write_text("\n".join(lines))

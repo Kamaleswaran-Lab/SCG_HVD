@@ -57,7 +57,7 @@ def load(meta_dir: Path):
 
 
 def covariate_table(md: pd.DataFrame) -> pd.DataFrame:
-    """Covariates summarised by class, with the missing count for each."""
+    """Covariates summarized by class, with the missing count for each."""
     rows = []
     for lab, g in md.groupby("Task1"):
         row = {"class": lab, "n_patients": len(g),

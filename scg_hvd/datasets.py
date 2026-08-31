@@ -7,7 +7,7 @@ canonical script (`archive/_canonical/1d__hvdnet_model.py`):
     7 columns   Dataset II family  -> SCG in columns 1, 2, 3
     12 columns  Dataset I family   -> SCG in columns 0, 1, 2
 
-Images are normalised with the ImageNet statistics. One published run, the Task II fusion
+Images are normalized with the ImageNet statistics. One published run, the Task II fusion
 model, used `[0.5], [0.5]` instead; that does not match an ImageNet-pretrained backbone and we
 recorded it as a defect during the audit. Reproducing it requires asking for
 `image_norm="half"` explicitly rather than getting it by accident.

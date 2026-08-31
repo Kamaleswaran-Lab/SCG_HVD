@@ -9,7 +9,7 @@ the scripts that did that are preserved verbatim in `archive/_canonical/`:
 | `chunk_10s_overlap.py` | Cuts the resampled recordings into 10 s windows on a 5 s stride and writes the segment index |
 | `generate_images.py` | Renders each segment's three axes as grayscale CWT scalograms |
 
-Both carry absolute paths from the machine they ran on, and neither is parameterised. They are
+Both carry absolute paths from the machine they ran on, and neither is parameterized. They are
 here as the record of what was done, not as a pipeline to invoke; adapt the paths at the top if
 you want to rerun them.
 
@@ -26,14 +26,14 @@ you want to rerun them.
         segment_metadata_task2.csv     start_time_sec
 
 The `filepath` column holds absolute paths from wherever the index was built.
-`scg_hvd.paths.localise` maps them onto the local root by keeping everything from the `Task1/`
+`scg_hvd.paths.localize` maps them onto the local root by keeping everything from the `Task1/`
 or `Task2/` component onwards, so the index files are portable as they are.
 
 ## Details that matter
 
 **Channel layout differs between the two datasets** and is inferred from the column count, not
-from a flag. Dataset I files have 12 columns with SCG in 0–2; Dataset II files have 7 with SCG
-in 1–3. See `scg_hvd/datasets.select_scg_channels`. Getting this wrong reads gyroscope or ECG
+from a flag. Dataset I files have 12 columns with SCG in 0-2; Dataset II files have 7 with SCG
+in 1-3. See `scg_hvd/datasets.select_scg_channels`. Getting this wrong reads gyroscope or ECG
 channels as accelerometer ones and produces plausible-looking nonsense.
 
 **The scalograms are grayscale**, rendered from `pywt.cwt(signal, np.arange(1, 129), 'morl')`

@@ -43,7 +43,7 @@ from scipy import signal as sps
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.paths import data_root, localise  # noqa: E402
+from scg_hvd.paths import data_root, localize  # noqa: E402
 
 from scg_hvd.datasets import select_scg_channels  # noqa: E402
 
@@ -89,7 +89,7 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(DATA / "meta" / f"segment_metadata_{a.task}.csv")
-    df["filepath"] = localise(df.filepath, DATA)
+    df["filepath"] = localize(df.filepath, DATA)
     df["dataset"] = np.where(df.patient_id.str.startswith("sub"), "Dataset II", "Dataset I")
 
     rows = []

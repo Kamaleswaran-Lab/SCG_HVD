@@ -40,7 +40,7 @@ from scipy import signal as sps
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.paths import data_root, localise  # noqa: E402
+from scg_hvd.paths import data_root, localize  # noqa: E402
 
 DATA = data_root(required=False)
 FS = 256
@@ -108,7 +108,7 @@ def segment_hr(x: np.ndarray, fs=FS) -> dict:
 
 def run(task: str, out_dir: Path, limit=None):
     meta = pd.read_csv(DATA / "meta" / f"segment_metadata_{task}.csv")
-    meta["filepath"] = localise(meta["filepath"], DATA)
+    meta["filepath"] = localize(meta["filepath"], DATA)
     if limit:
         meta = meta.head(limit)
 
@@ -158,7 +158,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
     ap.add_argument("--out", type=Path, default=Path("out/hr"))
-    ap.add_argument("--limit", type=int, default=None, help="cap the segment count, for a trial run")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="cap the segment count, for a trial run")
     a = ap.parse_args()
     run(a.task, a.out, a.limit)
 

@@ -7,7 +7,7 @@ of generalization. The split is at segment level, so 98.96% of Task I test segme
 results rather than leaving it implicit.
 
 What to expect. Of the 120 published cells, 103 match exactly and 17 differ in the second
-decimal place. The difference comes from the archive storing normalised confusion matrices and
+decimal place. The difference comes from the archive storing normalized confusion matrices and
 multiplying back to recover counts; everything here is computed from raw predictions, so a new
 value differing from the published one is correct rather than a failure. Training randomness
 means cells will not reproduce exactly in any case. The point of the script is to record
@@ -28,7 +28,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scg_hvd.paths import data_root, localise  # noqa: E402
+from scg_hvd.paths import data_root, localize  # noqa: E402
 
 from scg_hvd.metrics import (majority_baseline, metrics_table,  # noqa: E402
                              overall_metrics_are_dependent)
@@ -49,7 +49,7 @@ def load_task(task):
     df["label_name"] = df["label"]
     df["label"] = df["label"].map(label_map)
     # Repoint the signal paths at the local copy.
-    df["filepath"] = localise(df["filepath"], DATA)
+    df["filepath"] = localize(df["filepath"], DATA)
     return df, names
 
 

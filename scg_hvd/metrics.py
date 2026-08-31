@@ -1,7 +1,7 @@
-# Metrics are computed from raw predictions, not from the archive's normalise-then-multiply path.
+# Metrics are computed from raw predictions, not from the archive's normalize-then-multiply path.
 """Why this module exists rather than reusing what produced the published tables.
 
-The archived pipeline normalised each confusion matrix with `normalize='true'`, stored it to
+The archived pipeline normalized each confusion matrix with `normalize='true'`, stored it to
 four decimal places, and then had `results_selection.ipynb` multiply those fractions back by a
 hard-coded support to recover counts. The round trip loses precision: 17 of the 120 cells in
 the manuscript's Tables 2 and 3 disagree in the second decimal place, all by 0.015 percentage
