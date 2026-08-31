@@ -1,18 +1,20 @@
-# 지표를 원본 예측에서 직접 계산한다. 아카이브의 정규화-되곱 경로를 쓰지 않는다.
-"""
-왜 새로 쓰는가.
+# Metrics are computed from raw predictions, not from the archive's normalise-then-multiply path.
+"""Why this module exists rather than reusing what produced the published tables.
 
-아카이브는 혼동행렬을 `normalize='true'` 로 정규화해 소수 4자리로 저장한 뒤,
-`results_selection.ipynb` 가 그것을 하드코딩된 support 로 되곱아 절대 개수를 복원했다.
-그 왕복에서 손실이 생겨 원고 Table 2·3 의 120셀 중 **17셀이 소수 둘째 자리에서 어긋난다**
-(전부 0.015 퍼센트포인트 이하). 예를 들어 Task II 융합 실행의 AS-TR 행은 합이 1.0001 이다.
+The archived pipeline normalised each confusion matrix with `normalize='true'`, stored it to
+four decimal places, and then had `results_selection.ipynb` multiply those fractions back by a
+hard-coded support to recover counts. The round trip loses precision: 17 of the 120 cells in
+the manuscript's Tables 2 and 3 disagree in the second decimal place, all by 0.015 percentage
+points or less. The AS-TR row of the Task II fusion run, for instance, sums to 1.0001.
 
-여기서는 `y_true` / `y_pred` 만 받아 정수 혼동행렬에서 바로 계산한다. 예측 자체도
-`predictions.csv` 로 저장해 사후 재계산과 짝지은 검정이 가능하게 한다.
+Here everything is derived from `y_true` and `y_pred` against an integer confusion matrix. The
+predictions themselves are written to `predictions.csv` so that any metric can be recomputed
+afterwards and so that paired tests are possible at all.
 
-Overall 행은 micro-average 다. Referee 2 가 major 5 에서 지적했듯 이 정의에서는
-Se·Sp·Ac·F1 이 서로 대수적으로 종속이며(`overall_metrics_are_dependent` 참조),
-네 값을 모두 보고하는 것은 하나의 숫자를 네 번 적는 것에 가깝다.
+The Overall row is a micro-average. As Referee 2 pointed out, under that definition
+sensitivity, specificity, accuracy and F1 are algebraically dependent -- see
+`overall_metrics_are_dependent` -- so reporting all four is close to writing one number four
+times.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from sklearn.metrics import confusion_matrix
 
 
 def per_class_metrics(y_true, y_pred, class_names) -> pd.DataFrame:
-    """one-vs-rest 기준 클래스별 Se/Sp/Ac/F1 과 TP/FP/FN/TN."""
+    """Per-class Se/Sp/Ac/F1 with the underlying TP/FP/FN/TN, one class against the rest."""
     n = len(class_names)
     cm = confusion_matrix(y_true, y_pred, labels=list(range(n)))
     total = cm.sum()
@@ -45,7 +47,7 @@ def per_class_metrics(y_true, y_pred, class_names) -> pd.DataFrame:
 
 
 def overall_metrics(y_true, y_pred, n_classes) -> dict:
-    """micro-average. 원고의 Overall 행과 같은 정의다."""
+    """Micro-average, matching the definition behind the manuscript's Overall row."""
     cm = confusion_matrix(y_true, y_pred, labels=list(range(n_classes)))
     total = cm.sum()
     tp = int(np.trace(cm))
@@ -72,14 +74,14 @@ def macro_metrics(y_true, y_pred, class_names) -> dict:
 
 
 def metrics_table(y_true, y_pred, class_names) -> pd.DataFrame:
-    """클래스별 행 + Overall 행. 원고 Table 2/3 과 같은 모양이다."""
+    """Per-class rows plus an Overall row, laid out like Tables 2 and 3 of the manuscript."""
     pc = per_class_metrics(y_true, y_pred, class_names)
     ov = pd.DataFrame([overall_metrics(y_true, y_pred, len(class_names))])
     return pd.concat([pc, ov], ignore_index=True)
 
 
 def majority_baseline(y_true, class_names) -> dict:
-    """항상 최빈 클래스를 답하는 기준선. 이게 없으면 환자 단위 숫자를 해석할 수 없다."""
+    """Always answer the most common class. Patient-level numbers mean nothing without it."""
     y_true = np.asarray(y_true)
     maj = int(pd.Series(y_true).value_counts().idxmax())
     y_pred = np.full_like(y_true, maj)
@@ -87,9 +89,10 @@ def majority_baseline(y_true, class_names) -> dict:
     plain = float((y_pred == y_true).mean())
     return {
         "majority_class": class_names[maj],
-        # 원고 Overall 행과 같은 one-vs-rest micro 척도. 아무것도 안 해도 이만큼 나온다.
+        # The same one-vs-rest micro scale as the manuscript's Overall row: what doing
+        # nothing already scores on that scale.
         "accuracy_onevsrest": ov["accuracy"],
-        # 실제로 몇 개를 맞혔는지. 해석은 이쪽으로 해야 한다.
+        # How many were actually right. Read this one.
         "accuracy_plain": plain,
         "micro_sensitivity": ov["sensitivity"],
         **macro_metrics(y_true, y_pred, class_names),
@@ -97,10 +100,11 @@ def majority_baseline(y_true, class_names) -> dict:
 
 
 def aggregate_to_patient(df_pred: pd.DataFrame, n_classes: int, how="mean_prob") -> pd.DataFrame:
-    """세그먼트 예측을 환자 단위로 집계한다.
+    """Aggregate segment predictions into one prediction per patient.
 
-    df_pred 는 patient_id, y_true, y_pred 와 prob_0..prob_{n-1} 열을 가진다.
-    임상 진단은 환자 단위로 내려지므로(R1-m4) 환자 단위 표를 반드시 함께 낸다.
+    `df_pred` carries patient_id, y_true, y_pred and prob_0..prob_{n-1}. Clinical diagnosis is
+    made per patient, so the patient-level table is reported alongside every segment-level one
+    rather than offered on request.
     """
     prob_cols = [f"prob_{i}" for i in range(n_classes)]
     rows = []
@@ -117,16 +121,17 @@ def aggregate_to_patient(df_pred: pd.DataFrame, n_classes: int, how="mean_prob")
 
 
 def mcnemar_paired(y_true, pred_a, pred_b) -> dict:
-    """두 구성의 짝지은 비교. 환자 단위 예측에 쓴다.
+    """Paired comparison of two configurations, run on patient-level predictions.
 
-    Referee 2 major 5 가 요구한 대로 짝지은 검정이며, 세그먼트를 독립으로 보지 않는다.
-    표본이 작으므로 이항 정확검정을 쓴다.
+    Paired, as Referee 2 asked, so segments are never treated as independent samples. The
+    sample is small, so this uses the exact binomial test rather than the chi-square
+    approximation.
     """
     from scipy import stats
     y_true = np.asarray(y_true); a = np.asarray(pred_a); b = np.asarray(pred_b)
     a_ok, b_ok = a == y_true, b == y_true
-    n01 = int((~a_ok & b_ok).sum())   # a 틀리고 b 맞음
-    n10 = int((a_ok & ~b_ok).sum())   # a 맞고 b 틀림
+    n01 = int((~a_ok & b_ok).sum())   # a wrong, b right
+    n10 = int((a_ok & ~b_ok).sum())   # a right, b wrong
     n = n01 + n10
     p = 1.0 if n == 0 else float(stats.binomtest(n10, n, 0.5).pvalue)
     return {"n_a_only_correct": n10, "n_b_only_correct": n01,
@@ -135,11 +140,11 @@ def mcnemar_paired(y_true, pred_a, pred_b) -> dict:
 
 
 def overall_metrics_are_dependent(n_classes: int, sensitivity: float) -> dict:
-    """micro-average 에서 Sp·Ac 가 Se 로부터 대수적으로 결정됨을 보인다 (R2-M5).
+    """Demonstrate that under micro-averaging, Sp and Ac follow algebraically from Se.
 
-    C 클래스 micro-average 에서 FP = FN = N(1-Se) 이므로
+    In a C-class micro-average, FP = FN = N(1-Se), hence
         Sp = 1 - (1-Se)/(C-1),   Ac = 1 - 2(1-Se)/C,   F1 = Se
-    가 성립한다.
+    holds exactly.
     """
     c, se = n_classes, sensitivity
     return {"sensitivity": se,

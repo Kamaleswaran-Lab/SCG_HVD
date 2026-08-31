@@ -1,6 +1,7 @@
 #!/bin/bash
-# R2-m7 해석성 분석용 학습. 진행 중인 CV 잡은 체크포인트를 저장하지 않으므로 따로 돌린다.
-# 1 fold 만 쓰며, 목적은 attention 가중치와 Grad-CAM 을 낼 학습된 모델을 얻는 것이다.
+# Trains the models the interpretability analysis needs. The cross-validation jobs do not keep
+# checkpoints, so this runs separately. One fold is enough: the goal is a trained model to read
+# attention weights and Grad-CAM maps out of, not another performance estimate.
 #SBATCH --job-name=scg_interp
 #SBATCH --partition=gpu-hp
 #SBATCH --qos=duke_h200_hp
@@ -8,13 +9,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=06:00:00
-#SBATCH --output=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.out
-#SBATCH --error=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.err
+#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --error=logs/%x_%A_%a.err
 #SBATCH --array=0-1
 
 set -euo pipefail
-REPO=/hpc/home/jkim1/workspace/SCG_HVD
-PY=/hpc/home/jkim1/miniforge3/envs/tccc/bin/python
+REPO=${SCG_HVD_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+PY=${SCG_HVD_PYTHON:-python}
 cd "$REPO"
 
 MODELS=(1d fusion)

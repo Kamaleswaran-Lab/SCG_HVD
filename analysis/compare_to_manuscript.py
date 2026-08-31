@@ -1,19 +1,22 @@
-# 재현 결과를 원고 Table 2/3 과 120셀 전부 대조한다.
+# Checks the reproduction against all 120 cells of the manuscript's Tables 2 and 3.
 """
-목적 두 가지다.
+It serves two purposes.
 
-1. 이관된 파이프라인이 원고와 같은 수준을 내는지 확인한다.
-2. **리비전 표에 넣을 새 값을 만든다.**
+1. Confirm that the ported pipeline lands where the manuscript did.
+2. Produce the values that go into the revised tables.
 
-두 번째가 중요하다. 아카이브는 혼동행렬을 `normalize='true'` 로 저장한 뒤 하드코딩된
-support 로 되곱아 지표를 복원했고, 그 왕복 손실로 원고 120셀 중 17셀이 소수 둘째 자리에서
-어긋난다. 여기서는 원본 예측에서 직접 계산하므로 **새 값이 원고와 다른 것이 정상**이다.
+The second matters more than it sounds. The archived pipeline stored each confusion matrix
+with `normalize='true'` and recovered counts by multiplying back through a hard-coded support;
+that round trip is why 17 of the 120 published cells disagree in the second decimal place.
+Everything here is computed from raw predictions, so a new value differing from the published
+one is expected rather than alarming.
 
-학습 난수 때문에 셀이 정확히 일치하지는 않는다. 따라서 "일치/불일치" 판정이 아니라
-차이의 분포를 본다. 클래스별 차이가 몇 퍼센트포인트 안에 들어오는지, Overall 이 같은
-서열(1D < 2D < fusion)을 유지하는지가 판단 기준이다.
+Training randomness means cells will not match exactly in any case. So this reports the
+distribution of the differences rather than a pass/fail: how many percentage points the
+per-class differences stay within, and whether the Overall rows preserve the same ordering
+(1D < 2D < fusion).
 
-사용법.
+Usage.
     python analysis/compare_to_manuscript.py --out out/paper
 """
 
@@ -25,8 +28,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# 원고 Manuscript_BPEX.tex Table 2 (:395-425) 및 Table 3 (:440-470) 에서 옮긴 값.
-# (Se, Sp, Ac, F1) 퍼센트.
+# Transcribed from Manuscript_BPEX.tex, Table 2 (lines 395-425) and Table 3 (lines 440-470),
+# as (Se, Sp, Ac, F1) percentages.
 PAPER = {
     "task1": {
         "AR":  {"1d": (98.44, 99.50, 99.42, 96.18), "2d": (98.44, 99.88, 99.77, 98.44),
@@ -92,44 +95,45 @@ def main():
                                  "paper": pv, "repro": round(rv, 2), "diff": round(rv - pv, 2)})
 
     if missing:
-        print(f"[미완] {', '.join(missing)}\n")
+        print(f"[incomplete] {', '.join(missing)}\n")
     if not rows:
-        print("재현 결과가 아직 없다.")
+        print("no reproduction results yet.")
         return
 
     df = pd.DataFrame(rows)
     a.report.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(a.report, index=False)
 
-    print(f"=== 대조 요약 ({len(df)}셀) ===")
+    print(f"=== summary over {len(df)} cells ===")
     ad = df["diff"].abs()
-    print(f"  |차이| 중앙값 {ad.median():.2f}pp | 평균 {ad.mean():.2f}pp | 최대 {ad.max():.2f}pp")
+    print(f"  |diff| median {ad.median():.2f}pp | mean {ad.mean():.2f}pp | max {ad.max():.2f}pp")
     for thr in (0.5, 1.0, 2.0, 5.0):
-        print(f"  |차이| <= {thr:>4.1f}pp : {(ad <= thr).sum():3d} / {len(df)}  ({(ad<=thr).mean()*100:.0f}%)")
+        print(f"  |diff| <= {thr:>4.1f}pp : {(ad <= thr).sum():3d} / {len(df)}  "
+              f"({(ad<=thr).mean()*100:.0f}%)")
 
-    print("\n=== Overall 행 대조 ===")
+    print("\n=== Overall rows ===")
     ov = df[df["class"] == "Overall"].pivot_table(index=["task", "model"], columns="metric",
                                                   values=["paper", "repro"])
     print(ov.round(2).to_string())
 
-    print("\n=== 서열 유지 확인 (Overall Se) ===")
+    print("\n=== does the ordering hold? (Overall Se) ===")
     for task in PAPER:
         sub = df[(df.task == task) & (df["class"] == "Overall") & (df.metric == "Se")]
         if len(sub) < 3:
-            print(f"  {task}: 미완")
+            print(f"  {task}: incomplete")
             continue
         p = {r.model: r.paper for _, r in sub.iterrows()}
         r_ = {r.model: r.repro for _, r in sub.iterrows()}
         order_p = sorted(p, key=p.get)
         order_r = sorted(r_, key=r_.get)
-        ok = "일치" if order_p == order_r else "불일치"
-        print(f"  {task}: 원고 {' < '.join(order_p)} | 재현 {' < '.join(order_r)}  -> {ok}")
+        ok = "same" if order_p == order_r else "DIFFERENT"
+        print(f"  {task}: paper {' < '.join(order_p)} | repro {' < '.join(order_r)}  -> {ok}")
 
-    print("\n=== 차이가 큰 셀 (|diff| > 3pp) ===")
+    print("\n=== cells differing by more than 3pp ===")
     big = df[df["diff"].abs() > 3].sort_values("diff", key=abs, ascending=False)
-    print(big.to_string(index=False) if len(big) else "  없음")
+    print(big.to_string(index=False) if len(big) else "  none")
 
-    print(f"\n전체 표: {a.report}")
+    print(f"\nfull table: {a.report}")
 
 
 if __name__ == "__main__":

@@ -1,20 +1,24 @@
-# 분할을 한 곳에서 결정한다. 학습 코드는 분할 방식을 모르게 해서 "분할만 바꿨다"를 보장한다.
-"""
-네 가지 분할을 제공한다.
+# Every partitioning decision lives here. The training code never learns which split it was
+# handed, which is what lets us claim that two runs differ only in the split.
+"""Four ways to partition the segment table.
 
-    segment      논문 재현용. 세그먼트 단위 stratified. 환자가 train/val/test에 걸친다.
-    patient      환자 단위 단일 분할. 아카이브 `5_*` 실행과 동일한 절차.
-    patient_cv   환자 단위 stratified group k-fold. 리비전의 기본값.
-    loocv        leave-one-patient-out.
+    segment      Reproduces the published numbers. Stratified over segments, so a patient's
+                 windows land in train, val and test alike.
+    patient      A single patient-disjoint split, matching the archived `5_*` runs.
+    patient_cv   Patient-level stratified group k-fold. The default for the revision.
+    loocv        Leave one patient out.
 
-`segment`는 논문 숫자를 재현하기 위해 존재하며 **일반화 성능 추정에 쓰면 안 된다.**
-아카이브 코드가 이 분할만 사용했고, 그 결과 Task I 테스트 세그먼트의 98.96%가 학습·검증
-세트에 50% 겹치는 이웃 창을 갖게 됐다. `quantify_overlap_leakage()`로 재측정할 수 있다.
+`segment` exists to reproduce the published figures and must not be read as an estimate of
+generalization. The archived code used it exclusively, and as a consequence 98.96% of Task I
+test segments have a 50%-overlapping neighbour somewhere in training or validation. Call
+`quantify_overlap_leakage()` to measure it again rather than taking our word for it.
 
-검증 세트 구성 원칙. 아카이브 LOOCV(`evaluate.py:122-131`)는 테스트 환자의 라벨을 읽어
-같은 라벨 환자만 검증에 넣었고, 그 검증 손실로 조기 종료 지점을 골랐다. 테스트 라벨이
-모델 선택에 흘러드는 결함이다. 여기서는 검증 환자를 **남은 학습 풀에서 클래스 균형만 맞춰**
-뽑으며, 테스트 환자의 라벨을 어떤 경로로도 참조하지 않는다.
+One thing worth spelling out about validation sets. The archived LOOCV harness
+(`evaluate.py:122-131`) read the test patient's label and populated the validation set with
+patients carrying that same label, then picked the early-stopping epoch from the resulting
+validation loss. That leaks the test label into model selection. Here the validation patients
+are drawn from the remaining training pool with class balance as the only criterion, and the
+test patient's label is never consulted by any path.
 """
 
 from __future__ import annotations
@@ -26,10 +30,10 @@ from sklearn.model_selection import train_test_split, StratifiedKFold
 SPLIT_COLUMN = "split"
 
 
-# ---------------------------------------------------------------- 도우미
+# ---------------------------------------------------------------- helpers
 
 def patient_table(df: pd.DataFrame) -> pd.DataFrame:
-    """환자당 한 행. 라벨이 환자 내에서 유일하다고 가정하지 않고 최빈값을 쓴다."""
+    """One row per patient. Takes the modal label rather than assuming a patient has only one."""
     return (
         df.groupby("patient_id")["label"]
         .agg(lambda s: s.value_counts().idxmax())
@@ -47,13 +51,14 @@ def _assign(df, train_ids, val_ids, test_ids):
     return out
 
 
-# ---------------------------------------------------------------- 논문 재현
+# ------------------------------------------------------- reproducing the paper
 
 def segment_split(df: pd.DataFrame, test_size=0.1, val_size=0.2, random_state=42) -> pd.DataFrame:
-    """논문이 사용한 세그먼트 단위 분할을 그대로 재현한다.
+    """The segment-level split the paper used, reproduced call for call.
 
-    아카이브 `Task1/1_hvdnet/hvdnet_model.py:314-315` 와 동일한 두 번의 호출이다.
-    sklearn 버전에 따라 결과가 달라질 수 있으므로 결과를 CSV로 동결해 쓰는 것을 권한다.
+    Mirrors the two `train_test_split` calls at `Task1/1_hvdnet/hvdnet_model.py:314-315` in
+    the archive. The outcome can shift between scikit-learn versions, so freeze the result to
+    CSV and load that rather than relying on the seed to be portable.
     """
     trainval, test = train_test_split(
         df, test_size=test_size, stratify=df["label"], random_state=random_state
@@ -69,18 +74,18 @@ def segment_split(df: pd.DataFrame, test_size=0.1, val_size=0.2, random_state=42
     return out
 
 
-# ---------------------------------------------------------------- 환자 단위
+# ---------------------------------------------------------- patient-disjoint
 
 class SingletonClassError(ValueError):
-    """환자가 1명뿐인 클래스가 있어 환자 단위 분할이 정의되지 않을 때."""
+    """Raised when a class has too few patients for a patient-level split to be defined."""
 
 
 def singleton_classes(df: pd.DataFrame) -> dict:
-    """환자가 2명 미만인 클래스를 {라벨: [환자…]} 로 돌려준다.
+    """Classes with fewer than two patients, as {label: [patient_id, ...]}.
 
-    Task II 의 AS-AR 이 여기 걸린다(환자 CP-05 1명). 이런 클래스는 환자 단위 평가가
-    **정의상 불가능하다.** 리뷰어 R2-M3 가 "1명으로 대표되는 클래스는 통상적 test class 로
-    둘 수 없다"고 지적한 바로 그 지점이므로, 조용히 넘기지 말고 호출자가 결정하게 한다.
+    Task II's AS-AR falls here: it is one patient, CP-05. Such a class cannot be evaluated at
+    the patient level at all, because holding that patient out removes the class from training.
+    We surface it instead of proceeding quietly, so the caller has to decide what to do.
     """
     pt = patient_table(df)
     counts = pt.patient_label.value_counts()
@@ -93,20 +98,23 @@ def singleton_classes(df: pd.DataFrame) -> dict:
 def patient_split(
     df: pd.DataFrame, test_size=0.1, val_size=0.2, random_state=42, singleton_policy="error"
 ) -> pd.DataFrame:
-    """환자 단위 단일 분할. 아카이브 `Task1/5_hvdnet` 과 같은 절차다.
+    """A single patient-disjoint split, following the archived `Task1/5_hvdnet` procedure.
 
     singleton_policy
-        "error"        환자 1명짜리 클래스가 있으면 예외를 낸다(기본값).
-        "fix_to_train" 그 환자를 학습에 고정하고 평가에서 제외한다. 제외 사실을 반드시 보고할 것.
+        "error"        raise if any class has a single patient (the default).
+        "fix_to_train" pin that patient to training and drop the class from evaluation.
+                       Whoever chooses this must report the exclusion.
     """
     singles = singleton_classes(df)
     fixed: set[str] = set()
     if singles:
         if singleton_policy == "error":
             raise SingletonClassError(
-                "환자 단위 분할이 불가능한 클래스가 있다: "
-                + ", ".join(f"{k}({len(v)}명: {','.join(v)})" for k, v in singles.items())
-                + ". singleton_policy='fix_to_train' 으로 학습 고정하거나 해당 클래스를 제외하라."
+                "no patient-level split exists for: "
+                + ", ".join(f"{k} ({len(v)} patient(s): {','.join(v)})"
+                            for k, v in singles.items())
+                + ". Pass singleton_policy='fix_to_train' to pin them to training, or drop "
+                  "the class."
             )
         if singleton_policy != "fix_to_train":
             raise ValueError(f"unknown singleton_policy {singleton_policy!r}")
@@ -119,10 +127,10 @@ def patient_split(
     n_classes = pt.patient_label.nunique()
     if n_test < n_classes:
         raise SingletonClassError(
-            f"환자 {len(pt)}명에 test_size={test_size} 이면 테스트 환자가 {n_test}명인데 "
-            f"클래스가 {n_classes}개다. 클래스마다 최소 1명을 담을 수 없으므로 환자 단위 "
-            f"단일 분할이 성립하지 않는다. patient_cv_folds() 나 loocv_folds() 를 쓰거나 "
-            f"test_size 를 {n_classes / len(pt):.2f} 이상으로 올려라."
+            f"test_size={test_size} over {len(pt)} patients leaves {n_test} test patients "
+            f"for {n_classes} classes, so at least one class would be absent from the test "
+            f"set and a single patient-level split is not defined. Use patient_cv_folds() or "
+            f"loocv_folds(), or raise test_size to at least {n_classes / len(pt):.2f}."
         )
 
     trainval_ids, test_ids = train_test_split(
@@ -133,21 +141,22 @@ def patient_split(
         remain.patient_id, test_size=val_size, stratify=remain.patient_label,
         random_state=random_state,
     )
-    # 단일 환자 클래스는 학습에 고정한다. 평가 대상이 아니다.
+    # Single-patient classes stay in training; they are not evaluated.
     return _assign(df, set(train_ids) | fixed, set(val_ids), set(test_ids))
 
 
 def patient_cv_folds(df: pd.DataFrame, n_splits=5, val_size=0.2, random_state=42):
-    """환자 단위 stratified group k-fold. fold 마다 분할 열이 붙은 DataFrame 을 내놓는다.
+    """Patient-level stratified group k-fold, yielding one split-annotated frame per fold.
 
-    검증 환자는 그 fold 의 학습 풀에서만 뽑으며 테스트 환자의 라벨을 참조하지 않는다.
+    Validation patients come from that fold's training pool only, and the test patients'
+    labels are never consulted.
     """
     pt = patient_table(df)
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     for k, (tr_idx, te_idx) in enumerate(skf.split(pt.patient_id, pt.patient_label)):
         test_ids = set(pt.iloc[te_idx].patient_id)
         pool = pt.iloc[tr_idx]
-        # 클래스당 2명 미만이면 stratify 가 불가능하므로 그 경우만 무작위로 뽑는다.
+        # Stratifying needs two patients per class; fall back to a plain draw when it cannot.
         strat = pool.patient_label if pool.patient_label.value_counts().min() >= 2 else None
         train_ids, val_ids = train_test_split(
             pool.patient_id, test_size=val_size, stratify=strat, random_state=random_state + k
@@ -156,9 +165,10 @@ def patient_cv_folds(df: pd.DataFrame, n_splits=5, val_size=0.2, random_state=42
 
 
 def loocv_folds(df: pd.DataFrame, val_size=0.15, random_state=42):
-    """leave-one-patient-out. 단일 환자 클래스는 테스트로 내보내지 않고 학습에 고정한다.
+    """Leave one patient out. Single-patient classes stay in training and are never tested.
 
-    아카이브 하니스와 달리 검증 환자를 테스트 환자의 라벨로 고르지 않는다.
+    Unlike the archived harness, the validation patients are not chosen using the test
+    patient's label.
     """
     pt = patient_table(df)
     counts = pt.patient_label.value_counts()
@@ -170,7 +180,7 @@ def loocv_folds(df: pd.DataFrame, val_size=0.15, random_state=42):
     for k, test_pid in enumerate(testable):
         pool = pt[(pt.patient_id != test_pid)]
         n_val = max(1, int(round(len(pool) * val_size)))
-        # 클래스 균형을 맞춰 뽑되 테스트 환자의 라벨은 보지 않는다.
+        # Draw with class balance, without looking at the held-out patient's label.
         val_ids = set()
         for lab, g in pool.groupby("patient_label"):
             cand = [p for p in g.patient_id if p not in fixed]
@@ -185,10 +195,10 @@ def loocv_folds(df: pd.DataFrame, val_size=0.15, random_state=42):
         yield k, test_pid, _assign(df, train_ids, val_ids, {test_pid})
 
 
-# ---------------------------------------------------------------- 진단
+# ---------------------------------------------------------------- diagnostics
 
 def check_patient_disjoint(split_df: pd.DataFrame) -> dict:
-    """환자가 두 split 에 걸치지 않는지 확인한다. 환자 단위 분할이면 violations 가 0이어야 한다."""
+    """Check that no patient spans two splits. For a patient-level split, violations is 0."""
     per = split_df.groupby("patient_id")[SPLIT_COLUMN].nunique()
     return {
         "n_patients": int(per.size),
@@ -198,10 +208,11 @@ def check_patient_disjoint(split_df: pd.DataFrame) -> dict:
 
 
 def quantify_overlap_leakage(split_df: pd.DataFrame, stride_sec=5.0, against=("train",)) -> dict:
-    """테스트 세그먼트 중 학습 쪽에 50% 겹치는 이웃 창을 가진 비율을 센다.
+    """Fraction of test segments that have a 50%-overlapping neighbour on the training side.
 
-    창 10초 / 이동 5초이므로 시작 시각이 정확히 stride_sec 만큼 떨어진 같은 환자의 세그먼트가
-    원신호 5초를 공유한다. 감사 기준값은 Task I 92.63%(train) / 98.96%(train+val) 이다.
+    Windows are 10 s on a 5 s stride, so two segments of the same patient whose start times
+    differ by exactly `stride_sec` share five seconds of raw signal. Reference values from our
+    audit of Task I: 92.63% against training, 98.96% against training and validation together.
     """
     test = split_df[split_df[SPLIT_COLUMN] == "test"]
     ref = split_df[split_df[SPLIT_COLUMN].isin(against)]

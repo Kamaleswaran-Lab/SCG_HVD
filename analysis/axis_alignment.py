@@ -1,4 +1,4 @@
-# R2-m2 대응. 두 데이터셋의 축 라벨이 같은 물리 축을 가리키는지 신호로 확인한다.
+# Asks the signal whether the two datasets' axis labels point at the same physical axes.
 """
 Referee 2 minor 2.
 
@@ -6,24 +6,28 @@ Referee 2 minor 2.
      and datasets. Variation in sensor orientation could substantially affect axis-specific SCG
      morphology."
 
-두 데이터셋 모두 채널을 SCG_x / SCG_y / SCG_z 로 이름 붙였지만, 서로 다른 연구에서 다른
-가속도계로 기록됐다. 라벨이 같다고 물리 축이 같다는 보장은 없다. 원 문헌으로 확정할 수 없으므로
-신호에서 확인할 수 있는 만큼 확인한다.
+Both datasets name their channels SCG_x / SCG_y / SCG_z, but they were recorded in different
+studies with different accelerometers, and a shared label is no guarantee of a shared physical
+axis. The source documentation does not settle it, so we check what the signal can tell us and
+stop there.
 
-무엇을 볼 수 있나. 흉벽 SCG 에서 축마다 진동 특성이 다르다. 특히 배후-전방(dorsoventral) 축이
-대개 가장 큰 진폭을 갖는다. 따라서 데이터셋 간에
+What is checkable. Chest-wall SCG has different vibration characteristics along each axis; the
+dorsoventral axis usually carries the largest amplitude. So if two datasets agree on
 
-  (a) 축별 분산의 상대적 순서,
-  (b) 축별 주파수 대역 에너지 분포,
-  (c) 축 사이 상관구조
+  (a) the relative ordering of per-axis variance,
+  (b) the distribution of band-limited energy per axis, and
+  (c) the correlation structure between axes,
 
-가 비슷하면 라벨이 일관될 가능성이 높고, 순서가 뒤바뀌어 있으면 축이 치환됐을 가능성을 시사한다.
+the labelling is plausibly consistent, and if the ordering is swapped that points at an axis
+permutation.
 
-무엇을 확정할 수 없나. 이 분석은 **필요조건만 본다.** 통계가 비슷해도 회전이 섞여 있을 수 있고,
-개인 간 센서 부착 각도 편차는 어차피 분리되지 않는다. 결론은 "치환 증거가 없다" 또는 "치환이
-의심된다" 까지이며, "정렬돼 있다" 로 단정하지 않는다. 원고에는 그 한계까지 함께 쓴다.
+What is not checkable. This is a necessary condition, not a sufficient one. Similar statistics
+are compatible with a rotation, and per-subject variation in sensor placement angle is not
+separable in either dataset regardless. The strongest conclusion available is 'no evidence of
+a permutation' or 'a permutation is suspected'. It never licenses 'the axes are aligned', and
+the manuscript states the limitation alongside the result.
 
-사용법.
+Usage.
     python analysis/axis_alignment.py --out out/axis
 """
 
@@ -39,9 +43,11 @@ from scipy import signal as sps
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scg_hvd.paths import data_root, localise  # noqa: E402
+
 from scg_hvd.datasets import select_scg_channels  # noqa: E402
 
-DATA = Path("/work/jkim1/SCG_HVD_data")
+DATA = data_root(required=False)
 FS = 256
 AXES = ["x", "y", "z"]
 
@@ -54,7 +60,10 @@ def band_energy(sig, fs=FS, bands=((1, 5), (5, 15), (15, 30))):
 
 
 def per_segment_features(x):
-    """(T,3) SCG 에서 축별 특징. 진폭 스케일은 장비마다 다르므로 비율 위주로 본다."""
+    """Per-axis features from a (T,3) SCG array.
+
+    Absolute amplitude scale differs between devices, so everything here is a ratio.
+    """
     out = {}
     v = x.var(axis=0)
     frac = v / (v.sum() + 1e-12)
@@ -70,16 +79,17 @@ def per_segment_features(x):
 
 
 def main():
+    global DATA
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
-    ap.add_argument("--per-patient", type=int, default=10, help="환자당 표본 세그먼트 수")
+    ap.add_argument("--per-patient", type=int, default=10, help="segments sampled per patient")
     ap.add_argument("--out", type=Path, default=Path("out/axis"))
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(DATA / "meta" / f"segment_metadata_{a.task}.csv")
-    df["filepath"] = df.filepath.str.replace(
-        "/hpc/dctrl/jk622/exp/2025_BHI/data/Data/", str(DATA) + "/", regex=False)
+    df["filepath"] = localise(df.filepath, DATA)
     df["dataset"] = np.where(df.patient_id.str.startswith("sub"), "Dataset II", "Dataset I")
 
     rows = []
@@ -92,38 +102,40 @@ def main():
     d = pd.DataFrame(rows)
     d.to_csv(a.out / f"{a.task}_axis_features.csv", index=False)
 
-    print(f"=== {a.task}: 축별 분산 비율 (데이터셋별 평균) ===")
+    print(f"=== {a.task}: per-axis variance share, averaged within each dataset ===")
     vf = d.groupby("dataset")[[f"var_frac_{ax}" for ax in AXES]].mean().round(3)
     print(vf.to_string())
-    print("\n  축별 분산 비율의 순서가 데이터셋 간 같으면 라벨이 일관될 가능성이 높다.")
+    print("\n  Matching orderings across datasets suggest the labelling is consistent.")
     for ds, row in vf.iterrows():
         order = [AXES[i] for i in np.argsort(-row.values)]
         print(f"    {ds}: {' > '.join(order)}")
 
-    print(f"\n=== 우세 축 분포 ===")
+    print(f"\n=== which axis dominates ===")
     print(pd.crosstab(d.dataset, d.dominant_axis, normalize="index").round(3).to_string())
 
-    print(f"\n=== 대역별 에너지 비율 (데이터셋별 평균) ===")
+    print(f"\n=== band-limited energy share, averaged within each dataset ===")
     cols = [f"band{lo}_{hi}_{ax}" for ax in AXES for lo, hi in ((1, 5), (5, 15), (15, 30))]
     print(d.groupby("dataset")[cols].mean().round(3).T.to_string())
 
-    print(f"\n=== 축 간 상관 ===")
+    print(f"\n=== between-axis correlation ===")
     print(d.groupby("dataset")[["corr_xy", "corr_xz", "corr_yz"]].mean().round(3).to_string())
 
-    # 판정
+    # verdict
     if d.dataset.nunique() < 2:
-        print("\n판정 불가: 데이터셋이 하나뿐이다.")
+        print("\nNo verdict: only one dataset is present.")
         return
     o = {ds: [AXES[i] for i in np.argsort(-vf.loc[ds].values)] for ds in vf.index}
     same = len(set(tuple(v) for v in o.values())) == 1
     print("\n" + "=" * 66)
     if same:
-        print("판정: 축별 분산 순서가 두 데이터셋에서 일치한다. 축 치환의 증거는 없다.")
+        print("Verdict: the variance ordering agrees across datasets. No evidence of a\n"
+              "         permutation.")
     else:
-        print("판정: 축별 분산 순서가 데이터셋 간 다르다. 축 치환 또는 방향 차이가 의심된다.")
-    print("주의: 이 분석은 필요조건만 본다. 순서가 같아도 회전이 섞여 있을 수 있고,")
-    print("      개인별 부착 각도 편차는 분리되지 않는다. 원고에는 한계와 함께 기술한다.")
-    print(f"\n결과: {a.out}")
+        print("Verdict: the variance ordering differs between datasets. A permutation or an\n"
+              "         orientation difference is suspected.")
+    print("Note: this is a necessary condition only. A matching ordering is still compatible")
+    print("      with a rotation, and per-subject placement angle is not separable here.")
+    print(f"\noutput: {a.out}")
 
 
 if __name__ == "__main__":

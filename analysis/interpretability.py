@@ -1,4 +1,4 @@
-# R2-m7 대응. 1D attention 가중치와 2D Grad-CAM 으로 무엇을 보는지 보인다.
+# Shows where the model looks: attention weights in the 1D branch, Grad-CAM in the 2D one.
 """
 Referee 2 minor 7.
 
@@ -6,24 +6,27 @@ Referee 2 minor 7.
      pooling is included in the architecture, but the manuscript does not show which portions of
      the SCG contribute to classification."
 
-리뷰어가 지목한 것은 **1D 브랜치의 attention pooling** 이다. 그 가중치는 시간축에 대한 softmax
-이므로 "파형의 어느 구간이 분류에 기여하는가" 에 그대로 답한다. 아카이브의 Grad-CAM
-(`exp/Task1/3_hvdnet_fusion_model_LSTM_gradcam/gradcam_analysis.py`) 은 2D 스칼로그램용이라
-질문과 어긋나 있었다. 여기서는 둘 다 낸다.
+The thing the reviewer points at is the attention pooling in the 1D branch, and they are
+right that it is the natural place to look: its weights are a softmax over the time axis, so
+they answer "which parts of the waveform contribute" directly. The archived Grad-CAM script
+(`exp/Task1/3_hvdnet_fusion_model_LSTM_gradcam/gradcam_analysis.py`) works on the 2D
+scalograms and so does not answer that question. Both are produced here.
 
-1. **Attention 가중치** — 축별·클래스별로 시간축 분포를 낸다. 세그먼트가 10초이므로 가중치를
-   심장주기에 대응시키려면 ECG R-peak 기준으로 정렬해야 한다. ECG 는 세그먼트 파일 안에 있으므로
-   (`analysis/extract_heart_rate.py` 참조) R-peak 로 정렬한 평균 attention 도 함께 낸다.
-   이렇게 하면 "수축기 초반에 몰린다" 같은 진술이 가능해진다.
-2. **Grad-CAM** — 공유 EfficientNet 백본의 마지막 합성곱에 걸어 스칼로그램의 어느 시간-주파수
-   영역이 기여하는지 낸다.
+1. Attention weights, distributed over time, per axis and per class. A segment is ten seconds
+   long, so raw window position says little; to relate the weights to the cardiac cycle they
+   are aligned to ECG R-peaks, which the segment files carry (see
+   `analysis/extract_heart_rate.py`). That is what makes a statement like "concentrated in
+   early systole" possible at all.
+2. Grad-CAM on the last convolution of the shared EfficientNet backbone, showing which
+   time-frequency regions of the scalogram contribute.
 
-주의. 해석은 조심스럽게 해야 한다. attention 가중치가 큰 구간이 인과적으로 중요하다는 보장은
-없다. 원고에는 "모델이 어디를 보는지" 로만 쓰고 "그 구간이 병태를 담고 있다" 로 확장하지 않는다.
-R2-m5(AS-MR 해석)에서 같은 함정을 지적받았다.
+Read the output narrowly. A high attention weight is not evidence that the interval is
+causally important. The manuscript says where the model attends and stops there; it does not
+go on to claim those intervals carry the pathology. Referee 2 flagged exactly that overreach
+elsewhere in the review.
 
-사용법.
-    python analysis/interpretability.py --ckpt <fold 디렉터리> --task task1 --out out/interp
+Usage.
+    python analysis/interpretability.py --ckpt <fold directory> --task task1 --out out/interp
 """
 
 from __future__ import annotations
@@ -39,18 +42,20 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scg_hvd.paths import data_root, localise  # noqa: E402
+
 from scg_hvd.datasets import select_scg_channels  # noqa: E402
 from scg_hvd.models import build_model  # noqa: E402
 
-DATA = Path("/work/jkim1/SCG_HVD_data")
+DATA = data_root(required=False)
 FS = 256
-AXIS_ORDER = ["z", "x", "y"]   # SCGTrunk1D 가 z, x, y 순으로 이어붙인다
+AXIS_ORDER = ["z", "x", "y"]   # the order SCGTrunk1D concatenates them in
 
 
 # ---------------------------------------------------------------- attention
 
 class AttentionRecorder:
-    """SCGBranch.attn 의 softmax 가중치를 가로챈다."""
+    """Intercept the softmax weights inside SCGBranch.attn."""
 
     def __init__(self, trunk):
         self.weights = {}
@@ -62,7 +67,7 @@ class AttentionRecorder:
 
     def _make_hook(self, name):
         def hook(module, inp, out):
-            # out: (B, T, 1) — SelfAttention.forward 가 여기에 softmax 를 건다
+            # out: (B, T, 1), the tensor SelfAttention.forward applies its softmax to
             self.weights[name] = torch.softmax(out, dim=1).detach().squeeze(-1).cpu()
         return hook
 
@@ -72,7 +77,7 @@ class AttentionRecorder:
 
 
 def r_peaks(sig_1d, fs=FS):
-    """attention 을 심장주기에 정렬하기 위한 R-peak. extract_heart_rate 와 같은 방식."""
+    """R-peaks for aligning attention to the cardiac cycle, detected as in extract_heart_rate."""
     from scipy import signal as sps
     x = sig_1d - np.mean(sig_1d)
     nyq = fs / 2
@@ -84,7 +89,8 @@ def r_peaks(sig_1d, fs=FS):
 
 
 def beat_aligned(weights, peaks, win=(-0.2, 0.6), fs=FS):
-    """R-peak 기준으로 attention 을 잘라 평균한다. 심장주기 상 위치를 말할 수 있게 된다."""
+    """Cut the attention trace around each R-peak and average, so position can be stated in
+    terms of the cardiac cycle rather than of the window."""
     lo, hi = int(win[0] * fs), int(win[1] * fs)
     segs = [weights[p + lo:p + hi] for p in peaks
             if p + lo >= 0 and p + hi <= len(weights) and len(weights[p + lo:p + hi]) == hi - lo]
@@ -94,7 +100,7 @@ def beat_aligned(weights, peaks, win=(-0.2, 0.6), fs=FS):
 # ---------------------------------------------------------------- Grad-CAM
 
 class GradCAM2D:
-    """공유 EfficientNet 백본의 마지막 합성곱에 건 Grad-CAM."""
+    """Grad-CAM on the last convolution of the shared EfficientNet backbone."""
 
     def __init__(self, model, target_layer):
         self.model, self.act, self.grad = model, None, None
@@ -105,8 +111,11 @@ class GradCAM2D:
     def __call__(self, inputs, class_idx=None):
         self.model.zero_grad()
         out = self.model(*inputs)
-        idx = out.argmax(1) if class_idx is None else torch.as_tensor([class_idx])
-        out.gather(1, idx.view(-1, 1)).sum().backward()
+        # The index has to live on the same device as `out`; a CPU index against a CUDA
+        # logit tensor fails inside gather.
+        idx = (out.argmax(1) if class_idx is None
+               else torch.as_tensor([class_idx], device=out.device))
+        out.gather(1, idx.view(-1, 1).to(out.device)).sum().backward()
         w = self.grad.mean(dim=(2, 3), keepdim=True)
         cam = F.relu((w * self.act).sum(1))
         cam = cam / (cam.amax(dim=(1, 2), keepdim=True) + 1e-8)
@@ -120,13 +129,12 @@ def load_task(task):
     names = sorted(df.label.unique())
     df["label_name"] = df["label"]
     df["label"] = df["label"].map({n: i for i, n in enumerate(names)})
-    df["filepath"] = df["filepath"].str.replace(
-        "/hpc/dctrl/jk622/exp/2025_BHI/data/Data/", str(DATA) + "/", regex=False)
+    df["filepath"] = localise(df["filepath"], DATA)
     return df, names
 
 
 def plot_beat_aligned(df, out_png, title):
-    """R-peak 정렬 attention 을 클래스별로 그린다. 심장주기 상 위치를 읽을 수 있게 한다."""
+    """Plot the R-peak-aligned attention per class."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -159,13 +167,15 @@ def plot_beat_aligned(df, out_png, title):
 
 
 def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="cpu"):
-    """융합 모델의 공유 EfficientNet 백본에 Grad-CAM 을 걸어 클래스별 평균 맵을 낸다.
+    """Class-averaged Grad-CAM maps on the fusion model's shared EfficientNet backbone.
 
-    스칼로그램의 세로축은 CWT 스케일(주파수), 가로축은 시간이다. 따라서 맵을 클래스별로
-    평균하면 "어느 주파수 대역의 어느 시점이 기여하는가" 를 읽을 수 있다.
+    The scalogram's vertical axis is CWT scale (so, frequency) and its horizontal axis is
+    time, which means averaging the maps within a class shows which frequency band at which
+    point in the window carries the contribution.
 
-    주의. 스케일 그리드는 선형(1..128)이고 pseudo-frequency 는 스케일에 반비례하므로
-    세로축은 주파수에 대해 균등하지 않다. 축 라벨에 그 사실을 적는다.
+    One caveat that goes on the axis label: the scale grid is linear in scale (1..128) and
+    pseudo-frequency is inversely proportional to scale, so the vertical axis is not uniform
+    in frequency.
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -173,14 +183,14 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     from PIL import Image
     from scg_hvd.datasets import build_image_transform
 
-    # 공유 백본의 마지막 합성곱을 찾는다.
+    # Locate the last convolution in the shared backbone.
     backbone = model.trunk_2d.shared_backbone
     target = None
     for mod in backbone.modules():
         if isinstance(mod, torch.nn.Conv2d):
             target = mod
     if target is None:
-        print("  [Grad-CAM] 합성곱 층을 찾지 못했다"); return None
+        print("  [Grad-CAM] no convolutional layer found"); return None
 
     cam_engine = GradCAM2D(model, target)
     tf = build_image_transform()
@@ -206,7 +216,7 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
 
     avail = {c: np.mean(v, axis=0) for c, v in maps.items() if v}
     if not avail:
-        print("  [Grad-CAM] 사용할 표본이 없다"); return None
+        print("  [Grad-CAM] no usable samples"); return None
 
     fig, axes = plt.subplots(1, len(avail), figsize=(2.5 * len(avail) + 1.2, 3.0))
     if len(avail) == 1:
@@ -235,20 +245,22 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
                      "n_samples": len(maps[cls])})
     sf = pd.DataFrame(rows)
     sf.to_csv(out / "task1_fusion_gradcam_bands.csv", index=False)
-    print("\n  Grad-CAM 스케일 대역별 기여 비중 (균등하면 각 0.333)")
+    print("\n  Grad-CAM contribution by scale band (0.333 each if uniform)")
     print(sf.to_string(index=False))
-    print(f"  그림 저장: {png}")
+    print(f"  wrote {png}")
     return png
 
 
 def main():
+    global DATA
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--model", default="1d", choices=["1d", "fusion"])
     ap.add_argument("--ckpt", type=Path, default=None,
-                    help="학습된 가중치(.pt). 없으면 무작위 초기화로 배선만 확인한다.")
+                    help="trained weights (.pt). Without them the run only checks the wiring.")
     ap.add_argument("--ckpt-dir", type=Path, default=None,
-                    help="fold 디렉터리들의 상위 경로. 첫 model.pt 를 쓴다.")
+                    help="parent of the fold directories; the first model.pt found is used.")
     ap.add_argument("--n-per-class", type=int, default=40)
     ap.add_argument("--out", type=Path, default=Path("out/interp"))
     a = ap.parse_args()
@@ -261,12 +273,13 @@ def main():
         found = sorted(a.ckpt_dir.rglob("model.pt"))
         if found:
             a.ckpt = found[0]
-            print(f"  체크포인트 {len(found)}개 중 {a.ckpt} 사용")
+            print(f"  using {a.ckpt} out of {len(found)} checkpoints found")
     if a.ckpt and a.ckpt.exists():
         model.load_state_dict(torch.load(a.ckpt, map_location=device))
         print(f"loaded {a.ckpt}")
     else:
-        print("[주의] 학습 가중치 없이 실행한다. 배선 확인용이며 결과는 해석하지 말 것.")
+        print("[warning] running without trained weights. This checks the wiring only; do not\n"
+              "          interpret the output.")
 
     trunk = model.trunk if a.model == "1d" else model.trunk_1d
     rec = AttentionRecorder(trunk)
@@ -281,7 +294,7 @@ def main():
             x = torch.from_numpy(scg.T.copy()).unsqueeze(0).to(device)
             with torch.no_grad():
                 model.extract_features(x) if a.model == "1d" else trunk(x)
-            # ECG 로 R-peak 를 잡아 심장주기 정렬
+            # Detect R-peaks from the ECG so the weights can be aligned to the cardiac cycle
             ecg_idx = 5 if raw.shape[1] == 12 else 0
             pk = r_peaks(raw[:, ecg_idx].astype(np.float64))
             for ax, key in zip(AXIS_ORDER, ("branch_z", "branch_x", "branch_y")):
@@ -297,11 +310,11 @@ def main():
 
     d = pd.DataFrame(rows)
     d.to_csv(a.out / f"{a.task}_{a.model}_attention_stats.csv", index=False)
-    print(f"\n=== attention 요약 (세그먼트 {len(d)//3}개) ===")
+    print(f"\n=== attention summary over {len(d)//3} segments ===")
     print(d.groupby(["class", "axis"])[["entropy", "top10pct_mass", "peak_pos_sec"]]
           .mean().round(3).to_string())
-    print("\n  entropy 가 낮을수록 특정 구간에 집중한다. 균등 분포의 entropy 는 "
-          f"{np.log(2560):.3f} 이다.")
+    print("\n  Lower entropy means the weight is concentrated. A uniform distribution has "
+          f"entropy {np.log(2560):.3f}.")
 
     ba = []
     t = np.arange(int(-0.2 * FS), int(0.6 * FS)) / FS
@@ -315,14 +328,14 @@ def main():
     if ba:
         bdf = pd.DataFrame(ba)
         bdf.to_csv(a.out / f"{a.task}_{a.model}_beat_aligned_attention.csv", index=False)
-        print(f"\n  R-peak 정렬 평균 attention 저장 ({len(aligned)} 클래스 x 3 축)")
+        print(f"\n  wrote R-peak-aligned mean attention ({len(aligned)} classes x 3 axes)")
         png = plot_beat_aligned(
             bdf, a.out / f"{a.task}_{a.model}_attention.png",
             "Attention over the cardiac cycle, averaged within class "
             f"({a.model} encoder, R-peak aligned)")
-        print(f"  그림 저장: {png}")
+        print(f"  wrote {png}")
 
-        # 수축기(0~0.35 s) 대 나머지 비중 — "어디를 보는가" 를 수치로도 남긴다
+        # Systolic share (0 to 0.35 s after R), so "where it looks" is a number too
         sys_mask = (bdf.t_from_R_sec >= 0.0) & (bdf.t_from_R_sec <= 0.35)
         rows = []
         for (cls, ax_), g in bdf.groupby(["class", "axis"]):
@@ -331,19 +344,19 @@ def main():
             rows.append({"class": cls, "axis": ax_, "systolic_fraction": round(sysfrac, 4)})
         sf = pd.DataFrame(rows)
         sf.to_csv(a.out / f"{a.task}_{a.model}_systolic_fraction.csv", index=False)
-        print("\n  수축기(R+0~0.35s) attention 비중")
+        print("\n  attention mass in systole (R+0 to R+0.35 s)")
         print(sf.pivot(index="class", columns="axis", values="systolic_fraction").to_string())
-        print(f"  (창 전체에서 균등하면 0.35/{0.8:.1f} = {0.35/0.8:.3f})")
+        print(f"  (uniform over the window would give 0.35/{0.8:.1f} = {0.35/0.8:.3f})")
     if a.model == "fusion":
-        print("\n=== Grad-CAM (2D 브랜치) ===")
+        print("\n=== Grad-CAM (2D branch) ===")
         img_dir = DATA / ("Task1_images" if a.task == "task1" else "Task2_images")
         try:
             run_gradcam(model, df, class_names, img_dir, a.out,
                         n_per_class=a.n_per_class // 4 or 5, device=device)
         except Exception as e:
-            print(f"  [Grad-CAM 실패] {type(e).__name__}: {e}")
+            print(f"  [Grad-CAM failed] {type(e).__name__}: {e}")
 
-    print(f"\n결과: {a.out}")
+    print(f"\noutput: {a.out}")
 
 
 if __name__ == "__main__":

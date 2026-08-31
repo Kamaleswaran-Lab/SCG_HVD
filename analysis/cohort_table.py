@@ -1,27 +1,31 @@
-# R2-M6 코호트 표와 R2-m3 환자당 세그먼트 통계를 만든다.
+# Builds the cohort table and the per-patient segment statistics.
 """
-Referee 2 major 6 은 원 데이터셋 논문을 참조하라고 넘기지 말고 코호트 표를 직접 실으라고 했다.
+Referee 2's sixth major comment says that pointing readers at the source dataset papers is not
+adequate and the manuscript needs its own cohort table:
 
     "The manuscript should include a cohort table by diagnostic class and dataset. The reference
      standard for each valve diagnosis, disease severity, presence of multiple lesions, and timing
      relative to intervention should be clearly stated."
 
-Referee 2 minor 3 은 별도로 이것을 요구했다.
+Their third minor comment asks for something the same sources can answer:
 
     "Report the total recording duration and number of segments per patient, including the range
      and median. It is unclear why patients contribute substantially different numbers of windows
      and whether this creates patient-level weighting imbalance."
 
-두 요구가 같은 원천(`df_metadata.csv` + 세그먼트 메타데이터)에서 나오므로 한 스크립트로 낸다.
+Both draw on `df_metadata.csv` and the segment metadata, so one script produces both.
 
-정직하게 밝혀야 하는 한계 두 가지.
-  (a) Dataset II 정상군 29명은 `df_metadata.csv` 에 없다. 나이·성별·병력을 모른다.
-  (b) 판막 지표는 결측이 많다(대동맥판 면적 37/100, 승모판 압력차 3/100).
-표에 결측 수를 함께 적어 리뷰어가 스스로 판단할 수 있게 한다.
+Two limitations that the table has to state rather than hide.
+  (a) The 29 Dataset II controls are absent from `df_metadata.csv`. Their age, sex and history
+      are unknown.
+  (b) The valve measurements are sparse: aortic valve area for 37 of 100 patients, mitral mean
+      gradient for 3.
+Missing counts go into the table itself so a reader can judge for themselves.
 
-없는 항목도 명시한다. rhythm, sensor position, recording posture 는 어느 원천에도 없다.
+What we do not have is listed too. Cardiac rhythm, sensor position and recording posture
+appear in neither source.
 
-사용법.
+Usage.
     python analysis/cohort_table.py --out out/cohort
 """
 
@@ -33,9 +37,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path("/work/jkim1/SCG_HVD_data")
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-#: 리뷰어가 이름을 댄 항목 -> 우리가 가진 열. None 이면 어느 원천에도 없다.
+from scg_hvd.paths import data_root  # noqa: E402
+
+DATA = data_root(required=False)
+
+#: Each item the reviewer named -> the column we hold for it. None means no source has it.
 REQUESTED = {
     "age": "Age",
     "sex": "Gender",
@@ -47,7 +56,7 @@ REQUESTED = {
     "sensor position": None,
     "recording posture": None,
     "recording duration": "Duration",
-    "heart rate": "ECG 에서 산출 (analysis/extract_heart_rate.py)",
+    "heart rate": "derived from ECG (analysis/extract_heart_rate.py)",
     "reference standard": "Echo available / Date of echo",
 }
 
@@ -60,7 +69,7 @@ def build(task: str, out: Path):
     hr_csv = Path("out/hr") / f"{task}_patient_hr.csv"
     hr = pd.read_csv(hr_csv) if hr_csv.exists() else None
 
-    # 환자당 세그먼트 (R2-m3)
+    # segments per patient
     per_pat = (seg.groupby(["patient_id", "label"]).size()
                .reset_index(name="n_segments"))
     per_pat["dataset"] = np.where(per_pat.patient_id.str.startswith("sub"),
@@ -73,21 +82,22 @@ def build(task: str, out: Path):
         left_on="patient_id", right_on="Patient ID", how="left").drop(columns="Patient ID")
     per_pat.to_csv(out / f"{task}_per_patient.csv", index=False)
 
-    print(f"===== {task}: 환자당 세그먼트 (R2-m3) =====")
+    print(f"===== {task}: segments per patient =====")
     t = (per_pat.groupby("label")
          .agg(n_patients=("n_segments", "size"), total_segments=("n_segments", "sum"),
               seg_median=("n_segments", "median"), seg_min=("n_segments", "min"),
               seg_max=("n_segments", "max")).astype(int))
     print(t.to_string())
     imb = per_pat.n_segments.max() / per_pat.n_segments.min()
-    print(f"\n  전체 환자당 세그먼트: 중앙값 {per_pat.n_segments.median():.0f}, "
-          f"범위 {per_pat.n_segments.min()}–{per_pat.n_segments.max()}, "
-          f"최대/최소 비 {imb:.1f}배")
-    print(f"  -> 환자 단위 가중 불균형이 존재한다. 세그먼트 단위 지표는 세그먼트가 많은 환자에")
-    print(f"     더 큰 가중을 준다. 환자 단위 집계를 함께 보고해야 하는 이유다.")
+    print(f"\n  overall: median {per_pat.n_segments.median():.0f}, "
+          f"range {per_pat.n_segments.min()}-{per_pat.n_segments.max()}, "
+          f"max/min ratio {imb:.1f}x")
+    print(f"  -> patients are weighted unequally. A segment-level metric counts a patient in")
+    print(f"     proportion to how many windows they contributed, which is why the")
+    print(f"     patient-level aggregate is reported alongside.")
 
-    # 코호트 표 (R2-M6)
-    print(f"\n===== {task}: 코호트 표 (R2-M6) =====")
+    # cohort table
+    print(f"\n===== {task}: cohort table =====")
     d1 = per_pat[per_pat.dataset == "Dataset I"]
     rows = []
     for lab, g in per_pat.groupby("label"):
@@ -112,12 +122,15 @@ def build(task: str, out: Path):
 
     if (per_pat.dataset == "Dataset II").any():
         n2 = int((per_pat.dataset == "Dataset II").sum())
-        print(f"\n  [한계] Dataset II 환자 {n2}명은 코호트 메타데이터가 없어 나이·성별·병력이 결측이다.")
-        print(f"         심박수는 신호에서 산출했으므로 이 {n2}명도 포함된다.")
+        print(f"\n  [limitation] {n2} Dataset II participants carry no cohort metadata, so age,")
+        print(f"               sex and history are missing for them. Heart rate is derived from")
+        print(f"               the signal, so those {n2} are included in that column.")
     return per_pat, tab
 
 
 def main():
+    global DATA
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("out/cohort"))
     a = ap.parse_args()
@@ -127,10 +140,11 @@ def main():
         build(task, a.out)
         print()
 
-    print("===== 리뷰어가 이름을 댄 항목별 보유 현황 (R2-M6) =====")
+    print("===== what we hold for each item the reviewer named =====")
     for k, v in REQUESTED.items():
-        print(f"  {'O' if v else 'X'}  {k:24s} {v or '어느 원천에도 없음 — 한계로 명시할 것'}")
-    print(f"\n결과: {a.out}")
+        print(f"  {'yes' if v else ' no'}  {k:24s} "
+              f"{v or 'absent from both sources -- state as a limitation'}")
+    print(f"\noutput: {a.out}")
 
 
 if __name__ == "__main__":

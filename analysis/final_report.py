@@ -1,21 +1,26 @@
-# 리비전 최종 결과 정리. 응답 letter 와 원고 표에 들어갈 숫자를 한 번에 낸다.
+# Assembles the revision's results: every number that goes into the response letter or the
+# manuscript tables comes out of one run of this.
 """
-`run_patient_cv.py` 가 시드별로 남긴 결과를 모아 리비전에 필요한 형태로 정리한다.
+Collects what `run_patient_cv.py` left behind per seed and puts it in the shape the revision
+needs.
 
-내는 것.
-  1. 구성별 환자·세그먼트 단위 성능과 fold 간 95% CI
-  2. **두 기준선 대비 증분** — 다수 클래스 기준선과 공변량 기준선(나이+성별+HR)
-  3. 구성 간 짝지은 McNemar (환자 단위)
-  4. 원고용 LaTeX 표
+What it produces.
+  1. Patient- and segment-level performance per configuration, with 95% CIs across folds.
+  2. The increment over two baselines: the majority class, and cohort covariates alone
+     (age + sex + heart rate).
+  3. Paired McNemar tests between configurations, at patient level.
+  4. A LaTeX table for the manuscript.
 
-왜 기준선이 둘인가. 다수 클래스 기준선은 "아무것도 학습하지 않았을 때" 를 준다.
-공변량 기준선은 R2-M2 가 요구한 것으로 "SCG 없이 코호트 정보만으로" 를 준다. 모델이
-의미가 있으려면 후자를 넘어야 하며, 그 증분이 SCG 신호의 기여분이다.
+Two baselines rather than one, because they answer different questions. The majority-class
+baseline says what you get for learning nothing. The covariate baseline says what you get from
+the cohort without looking at the SCG signal at all. A model has to clear the second to be
+worth anything, and the gap above it is the part attributable to the signal.
 
-주의. 세그먼트를 독립 표본으로 보고 만든 신뢰구간은 쓰지 않는다(R2-M5 가 명시적으로 금지).
-여기서는 fold 간 분산만 쓴다.
+Confidence intervals here come from the spread across folds and nothing else. An interval that
+treats thousands of windows as independent samples would be far too narrow, and we do not
+compute one anywhere.
 
-사용법.
+Usage.
     python analysis/final_report.py --task task1 --out out/final
 """
 
@@ -48,12 +53,12 @@ PARAMS = {"1d": 526_740, "2d": 4_203_263, "fusion": 4_767_374,
 
 
 def rebuild_from_folds(seed_dir: Path):
-    """fold_summary.csv 가 없을 때 fold 디렉터리에서 되살린다.
+    """Rebuild the summary from the per-fold directories when fold_summary.csv is missing.
 
-    `fold_summary.csv` 와 `all_patient_predictions.csv` 는 **모든 fold 가 끝난 뒤에만** 쓰인다.
-    배열 잡이 시간 제한에 걸리면 이미 끝난 fold 의 결과까지 통째로 잃게 된다. 각 fold 는
-    `predictions.csv` 와 `patient_predictions.csv` 를 자기 디렉터리에 남기므로, 그것으로
-    같은 표를 다시 만든다.
+    `fold_summary.csv` and `all_patient_predictions.csv` are written only after every fold has
+    finished, so an array job that hits its wall clock loses the folds that did complete along
+    with the ones that did not. Each fold leaves its own `predictions.csv` and
+    `patient_predictions.csv` behind, which is enough to reconstruct the same table.
     """
     import re as _re
     from scg_hvd.metrics import macro_metrics as _macro, majority_baseline as _maj
@@ -92,7 +97,7 @@ def collect(root: Path, task: str, model: str):
             if (d / "all_patient_predictions.csv").exists():
                 pats.append(pd.read_csv(d / "all_patient_predictions.csv"))
         else:
-            # 잡이 아직 끝나지 않았거나 중단됐다. 남아 있는 fold 로 복구한다.
+            # The job is still running or was cut short. Recover from the folds that landed.
             f, p = rebuild_from_folds(d)
             if f is not None:
                 folds.append(f); rebuilt.append(f"{d.name}({len(f)} fold)")
@@ -101,7 +106,7 @@ def collect(root: Path, task: str, model: str):
         if names is None and (d / "config.json").exists():
             names = json.loads((d / "config.json").read_text()).get("class_names")
     if rebuilt:
-        print(f"  [부분 복구] {model}: {', '.join(rebuilt)}")
+        print(f"  [partial recovery] {model}: {', '.join(rebuilt)}")
     if not folds:
         return None
     return {"folds": pd.concat(folds, ignore_index=True),
@@ -135,13 +140,13 @@ def main():
         r = collect(a.cv, a.task, m)
         (got.__setitem__(m, r) if r else missing.append(m))
     if missing:
-        print(f"[미완] {', '.join(missing)}\n")
+        print(f"[incomplete] {', '.join(missing)}\n")
     if not got:
-        print("결과 없음."); return
+        print("no results found."); return
 
     names = next((v["class_names"] for v in got.values() if v["class_names"]), None)
 
-    # ---- 주 표 ----
+    # ---- main table ----
     rows = []
     for m, r in got.items():
         f = r["folds"]
@@ -161,30 +166,32 @@ def main():
     maj = float(t.majority.mean())
     cov = covariate_baseline()
 
-    print(f"===== {a.task}: 환자 단위 교차검증 최종 =====")
-    print(f"{'구성':38s} {'seed':>4s} {'환자 정확도 (95% CI)':>28s} {'macro-F1 (95% CI)':>26s}")
+    print(f"===== {a.task}: patient-level cross-validation =====")
+    print(f"{'configuration':38s} {'seed':>4s} "
+          f"{'patient accuracy (95% CI)':>28s} {'macro-F1 (95% CI)':>26s}")
     for _, r in t.iterrows():
         print(f"{r.label:38s} {int(r.n_seeds):>4d} "
               f"{r.pat_acc:.4f} [{r.pat_acc_lo:.4f}, {r.pat_acc_hi:.4f}]   "
               f"{r.pat_f1:.4f} [{r.pat_f1_lo:.4f}, {r.pat_f1_hi:.4f}]")
-    print(f"{'다수 클래스 기준선':38s} {'':>4s} {maj:.4f}")
+    print(f"{'majority-class baseline':38s} {'':>4s} {maj:.4f}")
     if cov and "accuracy" in cov:
-        print(f"{'공변량 기준선 (나이+성별+HR)':38s} {'':>4s} {cov['accuracy']:.4f}"
+        print(f"{'covariates only (age+sex+HR)':38s} {'':>4s} {cov['accuracy']:.4f}"
               f"{'':22s}{cov['macro_f1']:.4f}")
 
-    print(f"\n===== 기준선 대비 증분 =====")
+    print(f"\n===== increment over the baselines =====")
     for _, r in t.iterrows():
         d1 = r.pat_acc - maj
-        s1 = "위" if r.pat_acc_lo > maj else ("아래" if r.pat_acc_hi < maj else "겹침")
-        line = f"  {r.label:38s} 다수클래스 {d1:+.4f} (CI {s1})"
+        s1 = "above" if r.pat_acc_lo > maj else ("below" if r.pat_acc_hi < maj else "overlaps")
+        line = f"  {r.label:38s} vs majority {d1:+.4f} (CI {s1})"
         if cov and "accuracy" in cov:
             d2 = r.pat_acc - cov["accuracy"]
-            s2 = "위" if r.pat_acc_lo > cov["accuracy"] else ("아래" if r.pat_acc_hi < cov["accuracy"] else "겹침")
-            line += f" | 공변량 {d2:+.4f} (CI {s2})"
+            s2 = ("above" if r.pat_acc_lo > cov["accuracy"]
+                  else "below" if r.pat_acc_hi < cov["accuracy"] else "overlaps")
+            line += f" | vs covariates {d2:+.4f} (CI {s2})"
         print(line)
 
     # ---- McNemar ----
-    print(f"\n===== 구성 간 짝지은 McNemar (환자 단위) =====")
+    print(f"\n===== paired McNemar between configurations (patient level) =====")
     key = ["seed", "fold", "patient_id"]
     avail = [m for m in ORDER if m in got and got[m]["preds"] is not None]
     mc = []
@@ -199,13 +206,13 @@ def main():
             ca, cb = da.loc[common], db.loc[common]
             r = mcnemar_paired(ca.y_true.values, ca.y_pred.values, cb.y_pred.values)
             mc.append({"a": A, "b": B, "n": len(common), "seeds": len(set(k[0] for k in common)), **r})
-            flag = "  <== 유의" if r["p_value"] < 0.05 else ""
+            flag = "  <== significant" if r["p_value"] < 0.05 else ""
             print(f"  {LABEL[A]:34s} vs {LABEL[B]:34s} "
                   f"{r['accuracy_a']:.3f}/{r['accuracy_b']:.3f} n={len(common):3d} p={r['p_value']:.4f}{flag}")
     if mc:
         pd.DataFrame(mc).to_csv(a.out / f"{a.task}_mcnemar.csv", index=False)
 
-    # ---- 클래스별 pooled ----
+    # ---- per-class, pooled over folds ----
     for m in avail:
         p = got[m]["preds"]
         cn = got[m]["class_names"] or names or [str(i) for i in range(int(p.y_true.max()) + 1)]
@@ -238,8 +245,8 @@ def main():
               "the released code.",
               "\\end{tablenotes}", "\\end{threeparttable}", "\\end{table}"]
     (a.out / f"{a.task}_table.tex").write_text("\n".join(lines))
-    print(f"\nLaTeX 표: {a.out / (a.task + '_table.tex')}")
-    print(f"결과: {a.out}")
+    print(f"\nLaTeX table: {a.out / (a.task + '_table.tex')}")
+    print(f"output: {a.out}")
 
 
 if __name__ == "__main__":

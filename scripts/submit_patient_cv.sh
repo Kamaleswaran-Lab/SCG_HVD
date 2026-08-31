@@ -1,6 +1,7 @@
 #!/bin/bash
-# 환자 단위 교차검증을 gpu-hp 에 제출한다.
-# 배열 인덱스가 (task, model, seed) 18조합을 고른다. 각 잡이 5 fold 를 순차로 돌린다.
+# Submits the patient-level cross-validation.
+# The array index selects one of 18 (task, model, seed) combinations; each task runs its five
+# folds in sequence.
 #SBATCH --job-name=scg_cv
 #SBATCH --partition=gpu-hp
 #SBATCH --qos=duke_h200_hp
@@ -8,13 +9,13 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=24:00:00
-#SBATCH --output=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.out
-#SBATCH --error=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.err
+#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --error=logs/%x_%A_%a.err
 #SBATCH --array=0-17
 
 set -euo pipefail
-REPO=/hpc/home/jkim1/workspace/SCG_HVD
-PY=/hpc/home/jkim1/miniforge3/envs/tccc/bin/python
+REPO=${SCG_HVD_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+PY=${SCG_HVD_PYTHON:-python}
 cd "$REPO"
 
 # index = task*9 + model*3 + seed

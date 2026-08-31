@@ -1,19 +1,21 @@
-# R2-M1 보조 분석. 겹치는 창과 겹치지 않는 창의 환자 단위 결과를 나란히 낸다.
+# Puts the overlapping-window and non-overlapping-window runs side by side, at patient level.
 """
-Referee 2 major 1 이 요구한 두 분석 중 하나다.
+One of the two supplementary analyses Referee 2 asked for.
 
     "A supplementary analysis using nonoverlapping windows and, where feasible, group-wise
      splitting for classes with sufficient patient counts would strengthen the work."
 
-group-wise 분할은 `run_patient_cv.py` 가 제공하고, 이 스크립트는 그 위에서 겹침 유무만 바꾼
-두 실행을 비교한다.
+`run_patient_cv.py` provides the group-wise splitting; this script compares two runs of it
+that differ only in whether windows overlap.
 
-**해석에서 반드시 구분해야 하는 것.** 겹치지 않는 창만 쓰면 학습 세그먼트가 절반으로 준다
-(Task I 8678 -> 4365). 따라서 성능이 떨어져도 그것이 곧 "겹침이 성능을 만들었다" 는 뜻은
-아니다. 환자 단위 분할에서는 겹침이 train 과 test 를 넘나들지 않으므로 누수 경로가 없고,
-남는 차이는 주로 표본 감소다. 두 해석을 구분해 적기 위해 세그먼트 수를 함께 보고한다.
+One distinction has to be kept straight when reading the output. Keeping only every second
+window halves the training set (8678 -> 4365 segments on Task I). So a drop in performance
+would not by itself mean that overlap was producing the performance. Under a patient-level
+split overlap never crosses from training into test, so there is no leakage path left, and
+what remains is mostly the smaller sample. The segment counts are printed alongside so the
+two readings can be told apart.
 
-사용법.
+Usage.
     python analysis/compare_overlap.py --task task1 --out out/final
 """
 
@@ -65,19 +67,19 @@ def main():
                 "majority": float(f.majority_accuracy.mean()),
             })
     if not rows:
-        print("결과 없음."); return
+        print("no results found."); return
     t = pd.DataFrame(rows)
     t.to_csv(a.out / f"{a.task}_overlap_comparison.csv", index=False)
 
-    print(f"===== {a.task}: 창 겹침 유무 비교 (환자 단위) =====")
-    print(f"{'구성':22s} {'창':16s} {'seed':>4s} {'test seg':>9s} "
-          f"{'환자 정확도 (95% CI)':>26s} {'macro-F1':>10s}")
+    print(f"===== {a.task}: overlapping vs non-overlapping windows (patient level) =====")
+    print(f"{'configuration':22s} {'windows':16s} {'seed':>4s} {'test seg':>9s} "
+          f"{'patient accuracy (95% CI)':>26s} {'macro-F1':>10s}")
     for _, r in t.iterrows():
         print(f"{LABEL[r.model]:22s} {r.windows:16s} {int(r.n_seeds):>4d} {r.test_segments:>9,} "
               f"{r.pat_acc:.4f} [{r.pat_acc_lo:.4f}, {r.pat_acc_hi:.4f}]  {r.pat_f1:>9.4f}")
-    print(f"{'다수 클래스 기준선':22s} {'':16s} {'':>4s} {'':>9s} {t.majority.mean():.4f}")
+    print(f"{'majority baseline':22s} {'':16s} {'':>4s} {'':>9s} {t.majority.mean():.4f}")
 
-    print(f"\n===== 겹침 제거의 영향 =====")
+    print(f"\n===== effect of removing the overlap =====")
     for m in MODELS:
         sub = t[t.model == m]
         if len(sub) != 2:
@@ -88,16 +90,18 @@ def main():
         overlap_ci = (max(ov.pat_acc_lo, no.pat_acc_lo) <= min(ov.pat_acc_hi, no.pat_acc_hi))
         both_above = no.pat_acc_lo > no.majority and ov.pat_acc_lo > ov.majority
         print(f"  {LABEL[m]:22s} {ov.pat_acc:.4f} -> {no.pat_acc:.4f} ({d:+.4f}) | "
-              f"CI {'겹침' if overlap_ci else '분리'} | "
-              f"둘 다 기준선 위: {'예' if both_above else '아니오'} | "
-              f"세그먼트 {ov.test_segments:,} -> {no.test_segments:,}")
+              f"CI {'overlap' if overlap_ci else 'disjoint'} | "
+              f"both above baseline: {'yes' if both_above else 'no'} | "
+              f"segments {ov.test_segments:,} -> {no.test_segments:,}")
 
-    print("\n해석 주의. 겹치지 않는 창만 쓰면 학습 표본이 절반이 된다. 환자 단위 분할에서는")
-    print("겹침이 train 과 test 를 넘나들지 않으므로 누수 경로가 없고, 남는 차이는 주로")
-    print("표본 감소를 반영한다. 두 CI 가 겹치면 그 구분을 굳이 주장할 필요도 없다.")
+    print("\nRead this carefully. Dropping the overlap halves the training sample. Under a")
+    print("patient-level split overlap never crosses into the test set, so no leakage path")
+    print("remains and what is left mostly reflects the smaller sample. Where the two")
+    print("intervals overlap there is no distinction worth arguing about either way.")
 
-    # 짝지은 비교는 같은 환자 집합에서만 의미가 있으므로 fold 구성이 같은 경우에 한한다.
-    print(f"\n===== 같은 (seed, fold, patient) 에서의 짝지은 비교 =====")
+    # A paired test only means something on the same patients, so this is restricted to the
+    # (seed, fold, patient) triples the two runs share.
+    print(f"\n===== paired comparison on shared (seed, fold, patient) =====")
     key = ["seed", "fold", "patient_id"]
     for m in MODELS:
         ro = collect(a.overlap, a.task, m)
@@ -108,14 +112,14 @@ def main():
         db = rn["preds"].drop_duplicates(key).set_index(key)
         common = da.index.intersection(db.index)
         if len(common) < 10:
-            print(f"  {LABEL[m]}: 공통 예측 {len(common)}개 — 건너뜀"); continue
+            print(f"  {LABEL[m]}: only {len(common)} shared predictions, skipping"); continue
         ca, cb = da.loc[common], db.loc[common]
         r = mcnemar_paired(ca.y_true.values, ca.y_pred.values, cb.y_pred.values)
-        flag = "  <== 유의" if r["p_value"] < 0.05 else ""
+        flag = "  <== significant" if r["p_value"] < 0.05 else ""
         print(f"  {LABEL[m]:22s} overlapping {r['accuracy_a']:.4f} vs non-overlapping "
               f"{r['accuracy_b']:.4f} | n={len(common)} | p={r['p_value']:.4f}{flag}")
 
-    print(f"\n결과: {a.out / (a.task + '_overlap_comparison.csv')}")
+    print(f"\nwrote {a.out / (a.task + '_overlap_comparison.csv')}")
 
 
 if __name__ == "__main__":

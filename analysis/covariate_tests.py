@@ -1,26 +1,29 @@
-# R2-M2 대응. 클래스별 공변량 차이를 검정하고, 연령 매칭이 가능한지 판정한다.
+# Tests covariate differences between classes and decides whether age matching is feasible.
 """
-Referee 2 major comment 2 는 이렇게 요구한다.
+Referee 2's second major comment asks for this:
 
     "The authors need to also describe how they ensured that the observed changes in SCG are
      not related to co-variates such as HR, age, and sex. [...] Please report the co-variate
      differences in each HVD class and see if they are significant or not. If so, adjusting
      is required."
 
-이 스크립트가 내놓는 것은 세 가지다.
+Three things come out of it.
 
-1. 클래스별 공변량 표 (나이·성별·체격·EF·판막 지표). 리뷰어가 요구한 보고 그 자체다.
-2. 연령 매칭 가능성 판정. 매칭이 성립하면 매칭 표본을 내놓고, 성립하지 않으면 왜 그런지를
-   숫자로 보인다.
-3. **공변량 단독 기준선.** 나이·성별만으로 분류기를 학습해 얻는 성능이다. 매칭으로 보정할 수
-   없을 때, "SCG 모델이 공변량 너머에 무엇을 더하는가"를 정량화하는 유일한 방법이다.
-   SCG 모델의 환자 단위 성능을 이 기준선과 나란히 보고해야 한다.
+1. Covariates by class: age, sex, body habitus, ejection fraction, valve measurements. This is
+   the reporting the reviewer asked for, verbatim.
+2. A feasibility verdict on age matching. If matching works, the matched sample is written
+   out; if it does not, the numbers showing why are.
+3. A covariates-only baseline: what a classifier trained on age and sex alone achieves. When
+   the confound cannot be matched away, this is the only way left to quantify what the SCG
+   model adds on top of it, and the model's patient-level performance has to be read against
+   it.
 
-주의. Dataset II 의 정상군(`sub_*`)은 `df_metadata.csv` 에 없어 나이를 모른다. 따라서 모든
-공변량 분석은 Dataset I 환자로 한정되며, 그 한계를 결과에 명시한다.
+One caveat that limits all of this. The Dataset II controls (`sub_*`) are absent from
+`df_metadata.csv`, so their age is unknown. Every covariate analysis here is therefore
+restricted to Dataset I patients, and the output says so.
 
-사용법.
-    python analysis/covariate_tests.py --meta-dir /work/jkim1/SCG_HVD_data/meta --out out/covariates
+Usage.
+    python analysis/covariate_tests.py --out out/covariates
 """
 
 from __future__ import annotations
@@ -29,9 +32,15 @@ import argparse
 import json
 from pathlib import Path
 
+import sys
+
 import numpy as np
 import pandas as pd
 from scipy import stats
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scg_hvd.paths import data_root  # noqa: E402
 
 CONTINUOUS = [
     "Age", "Height (cm)", "Weight (kg)", "Ejection fraction (%)",
@@ -48,7 +57,7 @@ def load(meta_dir: Path):
 
 
 def covariate_table(md: pd.DataFrame) -> pd.DataFrame:
-    """클래스별 공변량 요약. 결측 수를 함께 보고한다."""
+    """Covariates summarised by class, with the missing count for each."""
     rows = []
     for lab, g in md.groupby("Task1"):
         row = {"class": lab, "n_patients": len(g),
@@ -66,7 +75,7 @@ def covariate_table(md: pd.DataFrame) -> pd.DataFrame:
 
 
 def omnibus_tests(md: pd.DataFrame) -> pd.DataFrame:
-    """클래스 간 차이 검정. 연속형은 Kruskal-Wallis, 성별은 카이제곱."""
+    """Test for between-class differences: Kruskal-Wallis for continuous, chi-square for sex."""
     out = []
     for c in CONTINUOUS + ["duration_sec"]:
         if c not in md:
@@ -75,7 +84,7 @@ def omnibus_tests(md: pd.DataFrame) -> pd.DataFrame:
         groups = [g for g in groups if len(g) >= 2]
         if len(groups) < 2:
             out.append({"covariate": c, "test": "Kruskal-Wallis", "stat": np.nan,
-                        "p": np.nan, "note": "결측이 많아 검정 불가"})
+                        "p": np.nan, "note": "too much missing data to test"})
             continue
         s, p = stats.kruskal(*groups)
         out.append({"covariate": c, "test": "Kruskal-Wallis", "stat": round(s, 3),
@@ -90,7 +99,10 @@ def omnibus_tests(md: pd.DataFrame) -> pd.DataFrame:
 
 
 def age_matching(md: pd.DataFrame, target="AS", caliper=3.0):
-    """target 클래스와 나머지를 1:1 최근접 연령 매칭한다. 성립 여부와 표본을 함께 돌려준다."""
+    """1:1 nearest-age matching of the target class against the rest.
+
+    Returns both the verdict and the matched sample, so a caller can see why it failed.
+    """
     a = md[md.Task1 == target]
     b = md[md.Task1 != target]
     lo, hi = max(a.Age.min(), b.Age.min()), min(a.Age.max(), b.Age.max())
@@ -125,18 +137,19 @@ def age_matching(md: pd.DataFrame, target="AS", caliper=3.0):
             stats.mannwhitneyu(pairs_df.case_age, pairs_df.ctrl_age).pvalue
         )
         res["control_class_mix"] = pairs_df.ctrl_class.value_counts().to_dict()
-    # 판정. 5클래스 재학습에 쓰려면 클래스당 최소 몇 명은 있어야 한다.
+    # Feasibility: retraining on five classes needs a workable number of patients per class.
     res["feasible_for_multiclass"] = bool(len(pairs_df) >= 15)
     res["verdict"] = (
-        "매칭 표본으로 재학습 가능" if res["feasible_for_multiclass"]
-        else f"매칭 불가. {target} 환자 {len(a)}명 중 대조군 연령 상한({int(b.Age.max())}세) "
-             f"이하가 {len(a_ov)}명뿐이라 표본이 {2*len(pairs_df)}명에 그친다."
+        "matched sample is large enough to retrain on" if res["feasible_for_multiclass"]
+        else f"matching is not feasible: of {len(a)} {target} patients only {len(a_ov)} fall at "
+             f"or below the oldest control ({int(b.Age.max())} years), leaving a matched sample "
+             f"of {2*len(pairs_df)}."
     )
     return res, pairs_df
 
 
 def covariate_only_baseline(md: pd.DataFrame, target="AS", n_splits=5, seed=42):
-    """나이·성별만으로 target 을 분류한다. SCG 모델이 넘어야 할 하한선이다."""
+    """Classify the target from age and sex alone: the floor the SCG model has to clear."""
     from sklearn.linear_model import LogisticRegression
     from sklearn.model_selection import StratifiedKFold
     from sklearn.metrics import roc_auc_score
@@ -157,7 +170,8 @@ def covariate_only_baseline(md: pd.DataFrame, target="AS", n_splits=5, seed=42):
         sps.append(tn / (tn + fp) if tn + fp else np.nan)
         aucs.append(roc_auc_score(y[te], prob) if len(set(y[te])) > 1 else np.nan)
 
-    # 나이 임계값 단독 (설명용, 전체 데이터에 적합시킨 낙관적 상한)
+    # An age threshold on its own. Fitted on all the data, so read it as an optimistic ceiling
+    # for illustration rather than as a held-out result.
     best = max(
         ({"threshold": int(t),
           "accuracy": float(((md.Age >= t).values == (y == 1)).mean()),
@@ -181,45 +195,50 @@ def covariate_only_baseline(md: pd.DataFrame, target="AS", n_splits=5, seed=42):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--meta-dir", type=Path, default=Path("/work/jkim1/SCG_HVD_data/meta"))
+    ap.add_argument("--meta-dir", type=Path, default=None,
+                    help="defaults to $SCG_HVD_DATA/meta")
     ap.add_argument("--out", type=Path, default=Path("out/covariates"))
     ap.add_argument("--target", default="AS")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
 
-    md = load(a.meta_dir)
-    print(f"Dataset I Task1 환자 {len(md)}명. Dataset II 정상군은 메타데이터가 없어 제외된다.\n")
+    meta_dir = a.meta_dir or (data_root() / "meta")
+    md = load(meta_dir)
+    print(f"{len(md)} Dataset I Task1 patients. The Dataset II controls carry no metadata and "
+          f"are excluded.\n")
 
     tab = covariate_table(md)
     tab.to_csv(a.out / "covariate_table.csv")
-    print("=== 클래스별 공변량 ===")
+    print("=== covariates by class ===")
     print(tab[["n_patients", "male_n", "female_n", "Age mean", "Age sd",
                "Ejection fraction (%) mean"]].to_string(), "\n")
 
     tests = omnibus_tests(md)
     tests.to_csv(a.out / "covariate_tests.csv", index=False)
-    print("=== 클래스 간 차이 검정 ===")
+    print("=== between-class tests ===")
     print(tests[["covariate", "test", "stat", "p", "significant"]].to_string(index=False), "\n")
 
     res, pairs = age_matching(md, target=a.target)
     pairs.to_csv(a.out / "age_matched_pairs.csv", index=False)
     (a.out / "age_matching.json").write_text(json.dumps(res, indent=2, ensure_ascii=False))
-    print("=== 연령 매칭 판정 ===")
-    print(f"  {a.target} 나이 {res['target_age_range']}, 대조군 {res['control_age_range']}")
-    print(f"  겹침 구간 {res['overlap_range']}, 매칭 {res['n_pairs']}쌍 ({res['n_matched_total']}명)")
-    print(f"  판정: {res['verdict']}\n")
+    print("=== age matching feasibility ===")
+    print(f"  {a.target} age {res['target_age_range']}, controls {res['control_age_range']}")
+    print(f"  overlap {res['overlap_range']}, {res['n_pairs']} pairs "
+          f"({res['n_matched_total']} patients)")
+    print(f"  verdict: {res['verdict']}\n")
 
     base = covariate_only_baseline(md, target=a.target)
     (a.out / "covariate_baseline.json").write_text(json.dumps(base, indent=2, ensure_ascii=False))
-    print("=== 공변량 단독 기준선 (나이+성별 로지스틱, 환자 단위 5-fold) ===")
-    print(f"  정확도 {base['accuracy_mean']:.4f} ± {base['accuracy_sd']:.4f} | "
-          f"민감도 {base['sensitivity_mean']:.4f} | 특이도 {base['specificity_mean']:.4f} | "
+    print("=== covariates-only baseline (age+sex logistic, patient-level 5-fold) ===")
+    print(f"  accuracy {base['accuracy_mean']:.4f} +/- {base['accuracy_sd']:.4f} | "
+          f"sensitivity {base['sensitivity_mean']:.4f} | "
+          f"specificity {base['specificity_mean']:.4f} | "
           f"AUC {base['auc_mean']:.4f}")
     t = base["age_threshold_only"]
-    print(f"  나이 임계값 단독(>= {t['threshold']}세): 정확도 {t['accuracy']:.4f}, "
-          f"민감도 {t['sensitivity']:.4f}, 특이도 {t['specificity']:.4f}")
-    print(f"\n=> SCG 모델의 {a.target} 성능은 이 기준선과 나란히 보고해야 한다.")
-    print(f"결과 저장: {a.out}")
+    print(f"  age threshold alone (>= {t['threshold']}): accuracy {t['accuracy']:.4f}, "
+          f"sensitivity {t['sensitivity']:.4f}, specificity {t['specificity']:.4f}")
+    print(f"\n=> Report the SCG model's {a.target} performance next to this baseline.")
+    print(f"wrote {a.out}")
 
 
 if __name__ == "__main__":

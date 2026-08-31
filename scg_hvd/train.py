@@ -1,20 +1,24 @@
-# 학습 루프. 모델 종류와 분할 방식을 모르게 해서 한 경로로 모든 실험을 돌린다.
-"""
-정본(`archive/_canonical/`)의 학습 설정을 그대로 옮겼다.
+# The training loop. It is told neither which model nor which split it was given, so every
+# experiment in the paper runs through this one path.
+"""The optimisation settings are carried over from the canonical archived scripts.
 
     optimizer   AdamW(lr, weight_decay=1e-4)
     scheduler   CosineAnnealingLR(T_max=epochs)
     criterion   CrossEntropyLoss(weight=balanced class weights)
-    선택 기준   검증 정확도 최대 시점의 체크포인트
+    selection   the checkpoint at the highest validation accuracy
 
-`class_weight_scope` 만 정본과 다르게 **선택 가능**하게 했다. 정본은 전체 데이터로 가중치를
-계산했고(`archive/_canonical/1d__hvdnet_model.py:310`) 이는 엄밀히는 학습 외 정보를 쓴 것이다
-(Referee 1 minor 2). 감사에서 실측한 편차는 Task I 0.041%, Task II 0.52% 로 미미하지만,
-논문 재현에는 `"all"`, 새 실험에는 `"train"` 을 쓴다.
+One thing is made configurable rather than inherited: `class_weight_scope`. The archived code
+computed class weights over the whole labelled set
+(`archive/_canonical/1d__hvdnet_model.py:310`), which strictly uses information from outside
+the training split. We measured how much this matters and it is small -- the weights shift by
+0.041% on Task I and 0.52% on Task II -- but the fix is free, so reproduction runs pass "all"
+and new experiments pass "train".
 
-`drop_last` 는 조건부다. 무조건 True 로 두면 모든 fold 에서 학습 표본 약 0.4% 와 옵티마이저
-스텝 하나가 빠져 아카이브 결과와 비교가 깨진다. 마지막 배치가 정확히 1개일 때만 버리며,
-이는 BatchNorm 이 배치 1에서 실패하는 것(아카이브 LOOCV fold 27 크래시)만 막는다.
+`drop_last` is conditional, and deliberately so. Setting it unconditionally would discard about
+0.4% of the training samples and one optimiser step in every fold, which is enough to make
+comparisons against the archived results meaningless. The last batch is dropped only when it
+holds exactly one sample, which is the case where BatchNorm fails -- the crash that killed
+fold 27 of the archived LOOCV run.
 """
 
 from __future__ import annotations
@@ -46,19 +50,20 @@ class TrainConfig:
     num_workers: int = 8
     seed: int = 42
     image_norm: str = "imagenet"
-    class_weight_scope: str = "all"     # "all" = 논문 재현, "train" = 누수 없는 새 실험
+    class_weight_scope: str = "all"     # "all" reproduces the paper; "train" avoids the leak
     early_stop_patience: int | None = None
     amp: bool = True
-    save_checkpoint: bool = False   # 해석성 분석(R2-m7)에 쓰려면 켠다
+    save_checkpoint: bool = False   # turn on to keep weights for the interpretability analysis
 
 
 def balanced_class_weights(labels, num_classes):
-    """전체 클래스 길이의 balanced 가중치 벡터를 만든다.
+    """A balanced weight vector of full class length.
 
-    환자 단위 fold 에서는 학습 분할에 아예 없는 클래스가 생길 수 있다. Task II 의 AS-AR 은
-    환자가 1명뿐이라 그 환자가 test 로 가는 fold 에서는 학습에 등장하지 않는다.
-    `compute_class_weight` 는 존재하는 클래스만 돌려주므로 그대로 쓰면 길이가 어긋난다.
-    없는 클래스는 가중치 1.0 으로 채운다. 학습에 등장하지 않으므로 손실에 기여하지 않는다.
+    A patient-level fold can leave a class out of the training split entirely. Task II's AS-AR
+    has one patient, so on the fold that holds that patient out the class never appears in
+    training. `compute_class_weight` returns entries only for the classes it sees, so passing
+    its output straight to CrossEntropyLoss raises a length mismatch. Absent classes get a
+    weight of 1.0 here; they contribute nothing to the loss because they never appear.
 
     Returns (weights, missing_classes).
     """
@@ -81,7 +86,7 @@ def make_loader(ds, batch_size, shuffle, num_workers, drop_last=False):
 
 
 def _drop_last_needed(n, batch_size):
-    """마지막 배치가 정확히 1개면 BatchNorm 이 터진다. 그 경우에만 버린다."""
+    """BatchNorm fails on a batch of one. Drop the last batch only in that case."""
     return n % batch_size == 1
 
 
@@ -93,7 +98,7 @@ def set_seed(seed):
 
 @torch.no_grad()
 def predict(model, loader, model_name, device, n_classes):
-    """예측과 확률을 모두 돌려준다. 지표는 이 원본에서 계산한다."""
+    """Return predictions and probabilities. Every metric is computed from these."""
     model.eval()
     ys, ps, probs = [], [], []
     for batch in loader:
@@ -108,7 +113,7 @@ def predict(model, loader, model_name, device, n_classes):
 
 def run_training(split_df: pd.DataFrame, cfg: TrainConfig, image_dir=None,
                  out_dir: Path | None = None, class_names=None, verbose=True):
-    """한 번의 학습·평가. split_df 는 'split' 열로 train/val/test 를 지정한다."""
+    """One train-and-evaluate run. `split_df` marks train/val/test in its 'split' column."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     set_seed(cfg.seed)
 
@@ -131,7 +136,8 @@ def run_training(split_df: pd.DataFrame, cfg: TrainConfig, image_dir=None,
     weight_src = split_df if cfg.class_weight_scope == "all" else tr
     cw_full, missing = balanced_class_weights(weight_src["label"], cfg.num_classes)
     if missing:
-        print(f"  [주의] 학습 분할에 없는 클래스 {missing} — 이 fold 에서는 예측될 수 없다.",
+        print(f"  [warning] classes {missing} are absent from the training split and cannot "
+              f"be predicted on this fold.",
               flush=True)
     criterion = nn.CrossEntropyLoss(weight=torch.tensor(cw_full, dtype=torch.float, device=device))
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)

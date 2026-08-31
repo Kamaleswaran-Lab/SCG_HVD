@@ -1,21 +1,23 @@
-# 논문의 1D/2D/융합 모델을 하나로 통합한 정의. 아카이브의 판본 분기를 여기서 끝낸다.
-"""
-출처. `archive/_canonical/` 의 세 정본에서 이식했다.
+# One definition of the 1D, 2D and fusion models. The archive's fork of near-identical
+# variants stops here.
+"""Ported from the three canonical scripts under `archive/_canonical/`:
 
-    1D      1d__hvdnet_model.py            md5 c1bf7a2918d802a948824007a230b051
-    2D      2d__hvdnet_fusion_model.py     md5 2c6851b26eda18f556c041ce34e90913
-    융합    fusion__hvdnet_fusion_model.py md5 3c1eeee137328ba62bcb724984654bb3
+    1D       1d__hvdnet_model.py             md5 c1bf7a2918d802a948824007a230b051
+    2D       2d__hvdnet_fusion_model.py      md5 2c6851b26eda18f556c041ce34e90913
+    fusion   fusion__hvdnet_fusion_model.py  md5 3c1eeee137328ba62bcb724984654bb3
 
-이식 시 주의했던 함정 두 가지를 기록해 둔다.
+Two traps caught us during the port, recorded so nobody has to find them twice.
 
-1. 2D 정본과 융합 정본은 **클래스 이름이 같다**(`MultiEfficientNetFusion`,
-   `OptimizedMultiEfficientNetFusion`). 그러나 2D 쪽은 1D 브랜치가 제거돼 분류기 입력이
-   126차원이고 융합 쪽은 426차원이다. 여기서는 이름을 갈라 놓았다.
-2. 저장소 최상위에 있던 `exp/hvdnet_fusion_model.py` 등 top-level 사본은 SelfAttention이
-   `weights * x * weights`로 가중치를 두 번 곱한다. 논문 실행에 쓰인 정본은 모두
-   `weights * x`이며, 아래 구현도 정본을 따른다.
+1. The 2D and fusion canonicals define classes with the same names,
+   `MultiEfficientNetFusion` and `OptimizedMultiEfficientNetFusion`. They are not the same
+   model: the 2D one has the 1D branch removed, so its classifier takes 126 dimensions where
+   the fusion one takes 426. The names are kept distinct here.
+2. The top-level copies in the archive, such as `exp/hvdnet_fusion_model.py`, apply the
+   attention weights twice, `weights * x * weights`. Every canonical used for a published run
+   applies them once, and so does the implementation below.
 
-파라미터 수(검증됨). Shared 계열이 논문 실행이고 Independent 계열은 원고 기술이다.
+Parameter counts, verified against the code. The Shared variants are what actually ran; the
+Independent variants are what the manuscript described before we corrected it.
 
     HVDNet1D                    526,740
     Image2DShared             4,203,263      Image2DIndependent    12,614,905
@@ -27,10 +29,10 @@ import torch.nn as nn
 import timm
 
 
-# ---------------------------------------------------------------- 1D 구성요소
+# --------------------------------------------------------- 1D building blocks
 
 class SelfAttention(nn.Module):
-    """시퀀스 축을 가중 합으로 축약한다."""
+    """Collapse the sequence axis into a weighted sum."""
 
     def __init__(self, input_dim):
         super().__init__()
@@ -65,10 +67,11 @@ class ResidualBlock(nn.Module):
 
 
 class SCGBranch(nn.Module):
-    """단일 축 SCG 파형을 100차원으로 인코딩한다."""
+    """Encode one axis of the SCG waveform into 100 dimensions."""
 
     def __init__(self, in_channels=1, conv_channels=64, lstm_hidden=100):
-        # 기본값 (64, 100) 이 논문 구성이다. parameter-matched 비교(R1-M6, R2-M4)에서만 키운다.
+        # The defaults (64, 100) are the published configuration. They are widened only for
+        # the capacity-controlled comparisons.
         super().__init__()
         self.resblock1 = ResidualBlock(in_channels, conv_channels, kernel_size=7, padding=3)
         self.resblock2 = ResidualBlock(conv_channels, conv_channels, kernel_size=5, padding=2)
@@ -87,7 +90,10 @@ class SCGBranch(nn.Module):
 
 
 class SCGTrunk1D(nn.Module):
-    """세 축을 각각 인코딩해 300차원으로 이어 붙인다. 축 순서는 정본대로 z, x, y이다."""
+    """Encode the three axes separately and concatenate to 300 dimensions.
+
+    The axis order is z, x, y, following the canonical scripts rather than the obvious x, y, z.
+    """
 
     def __init__(self, conv_channels=64, lstm_hidden=100):
         super().__init__()
@@ -104,7 +110,7 @@ class SCGTrunk1D(nn.Module):
 
 
 class HVDNet1D(nn.Module):
-    """Temporal Encoder (1D). 원고 Table 2/3의 'Temporal Encoder (1D)' 행."""
+    """The 'Temporal Encoder (1D)' row of the manuscript's Tables 2 and 3."""
 
     def __init__(self, num_classes, conv_channels=64, lstm_hidden=100):
         super().__init__()
@@ -122,15 +128,16 @@ class HVDNet1D(nn.Module):
         return self.trunk(x)
 
 
-# ---------------------------------------------------------------- 2D 구성요소
+# --------------------------------------------------------- 2D building blocks
 
 
 def _feature_dim(backbone) -> int:
-    """백본이 실제로 내놓는 차원을 순전파로 잰다.
+    """Measure the backbone's real output width with a forward pass.
 
-    `num_features` 속성을 믿으면 안 된다. timm 의 MobileNetV3 는 `num_features` 가 960 이지만
-    `num_classes=0` 으로 만들면 conv_head 를 거쳐 1280 을 내놓는다. 속성값으로 투영층을 만들면
-    형상 불일치로 터진다. EfficientNet-B0 에서는 둘이 같아 논문 구성에서는 드러나지 않았다.
+    Do not trust the `num_features` attribute. timm's MobileNetV3 reports 960 there but emits
+    1280 when built with `num_classes=0`, because the output still passes through conv_head.
+    Sizing the projection from the attribute raises a shape error at the first batch. The two
+    agree for EfficientNet-B0, so the published configuration never exposed this.
     """
     import torch as _t
     was_training = backbone.training
@@ -142,7 +149,7 @@ def _feature_dim(backbone) -> int:
 
 
 class EfficientNetProjector(nn.Module):
-    """축 하나의 스칼로그램을 out_dim 으로 투영한다. Independent 계열에서 축마다 하나씩 쓴다."""
+    """Project one axis' scalogram to out_dim. The Independent variants use one per axis."""
 
     def __init__(self, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -158,7 +165,7 @@ class EfficientNetProjector(nn.Module):
 
 
 class _SharedImageTrunk(nn.Module):
-    """백본 하나를 세 축에 재사용한다. 축당 out_dim//3 이므로 총 (out_dim//3)*3 차원이다."""
+    """Reuse a single backbone across the three axes, out_dim//3 each, (out_dim//3)*3 total."""
 
     def __init__(self, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -180,7 +187,7 @@ class _SharedImageTrunk(nn.Module):
 
 
 class _IndependentImageTrunk(nn.Module):
-    """축마다 독립 백본. 원고가 기술한 구성이며 실제 논문 실행에는 쓰이지 않았다."""
+    """A separate backbone per axis: what the manuscript described, not what was ever run."""
 
     def __init__(self, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -202,7 +209,7 @@ def _head(in_dim, num_classes):
 
 
 class Image2DShared(nn.Module):
-    """Image Encoder (2D), 공유 백본. 원고 Table 2/3의 'Image Encoder (2D)' 행에 해당한다."""
+    """The 'Image Encoder (2D)' row of Tables 2 and 3, with the backbone shared across axes."""
 
     def __init__(self, num_classes, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -217,7 +224,7 @@ class Image2DShared(nn.Module):
 
 
 class Image2DIndependent(nn.Module):
-    """Image Encoder (2D), 독립 백본 3개. 파라미터 매칭 비교용(R1-M6)."""
+    """Image Encoder (2D) with three independent backbones, for the capacity comparison."""
 
     def __init__(self, num_classes, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -231,10 +238,10 @@ class Image2DIndependent(nn.Module):
         return self.trunk(ix, iy, iz)
 
 
-# ---------------------------------------------------------------- 융합
+# ---------------------------------------------------------------------- fusion
 
 class FusionShared(nn.Module):
-    """Proposed (1D + 2D), 공유 백본. 논문이 실제로 돌린 구성이다."""
+    """Proposed (1D + 2D) with a shared backbone: the configuration that produced the paper."""
 
     def __init__(self, num_classes, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -250,7 +257,7 @@ class FusionShared(nn.Module):
 
 
 class FusionIndependent(nn.Module):
-    """Proposed (1D + 2D), 독립 백본 3개. 원고가 기술한 구성이다."""
+    """Proposed (1D + 2D) with three independent backbones: what the manuscript described."""
 
     def __init__(self, num_classes, model_name="efficientnet_b0", out_dim=128):
         super().__init__()
@@ -265,7 +272,7 @@ class FusionIndependent(nn.Module):
         return torch.cat([self.trunk_1d(x1d), self.trunk_2d(ix, iy, iz)], dim=1)
 
 
-# ---------------------------------------------------------------- 팩토리
+# --------------------------------------------------------------------- factory
 
 MODELS = {
     "1d": HVDNet1D,
@@ -275,7 +282,7 @@ MODELS = {
     "fusion_independent": FusionIndependent,
 }
 
-#: 논문 실행이 사용한 구성. 재현 테스트가 이 값을 검사한다.
+#: What the published runs used. The reproduction check asserts against these.
 PAPER_PARAM_COUNTS = {
     "1d": 526_740,
     "2d": 4_203_263,
@@ -298,10 +305,15 @@ def count_parameters(model, trainable_only=True):
     return sum(p.numel() for p in ps)
 
 
-# ---------------------------------------------------------------- 리비전 추가 베이스라인
-# Referee 1 concern 5 가 요구한 1D ResNet 과 TCN. 원고의 1D 인코더와 같은 입력
-# (3, 2560) 을 받고 같은 학습 경로를 쓴다. `width` 로 파라미터를 맞출 수 있게 해
-# concern 6 의 parameter-matched 비교에도 쓴다.
+# ------------------------------------------------- baselines added for the revision
+# A 1D ResNet and a TCN, named by Referee 1. Both take the same (3, 2560) input as the
+# paper's temporal encoder and run through the same training path. `width` lets them be
+# sized to match the fusion model, so they double as capacity-controlled baselines.
+#
+# These were run but are not reported in the manuscript: the paper's claim is about adding a
+# modality, not about competing with other sequence architectures, so the ablation that
+# varies the image backbone is the one that tests it. They are kept here because the runs
+# happened and the record should show them.
 
 class _BasicBlock1D(nn.Module):
     def __init__(self, cin, cout, stride=1):
@@ -323,7 +335,7 @@ class _BasicBlock1D(nn.Module):
 
 
 class ResNet1D(nn.Module):
-    """1D ResNet 베이스라인 (R1-M5). 채널 축은 축 3개를 그대로 받는다."""
+    """1D ResNet baseline. The three SCG axes enter as the channel dimension."""
 
     def __init__(self, num_classes, width=64, layers=(2, 2, 2, 2), in_channels=3):
         super().__init__()
@@ -374,7 +386,7 @@ class _TCNBlock(nn.Module):
 
 
 class TCN(nn.Module):
-    """Temporal Convolutional Network 베이스라인 (R1-M5). 인과 팽창 합성곱 스택."""
+    """Temporal Convolutional Network baseline: a stack of causal dilated convolutions."""
 
     def __init__(self, num_classes, width=64, levels=6, kernel_size=7, in_channels=3):
         super().__init__()
@@ -397,13 +409,15 @@ class TCN(nn.Module):
 MODELS.update({"resnet1d": ResNet1D, "tcn": TCN})
 
 
-# ---------------------------------------------------------------- parameter-matched 구성
-# R1-M6 과 R2-M4 는 "융합 모델이 용량이 커서 좋아진 것 아니냐" 를 묻는다. 아래 세 구성은
-# 융합 모델(4,767,374) 과 파라미터 수를 맞춘 것이며, 동시에 R1-M5 가 요구한 강한 베이스라인
-# 역할을 한다. 용량을 통제했으므로 차이가 나면 아키텍처 차이로 읽을 수 있다.
+# ------------------------------------------------- capacity-matched configurations
+# Both referees asked whether the fusion model simply wins by being larger. These three are
+# sized to the fusion model's 4,767,374 parameters, so a remaining difference cannot be
+# attributed to capacity. The manuscript answers the question with the backbone ablation
+# below instead, which isolates the same thing without inflating a model nobody would
+# propose; these are kept for completeness.
 
 def temporal_matched(num_classes, **kw):
-    """논문의 1D 인코더를 융합 모델 크기까지 키운 것. R2-M4 의 parameter-matched temporal baseline."""
+    """The paper's temporal encoder widened to the size of the fusion model."""
     return HVDNet1D(num_classes, conv_channels=208, lstm_hidden=288)
 
 
@@ -422,11 +436,12 @@ MODELS.update({
 })
 
 
-# ---------------------------------------------------------------- 2D 백본 교체 ablation
-# R2-M4 가 요구한 ablation 이자, 논문의 주장을 직접 지지하는 실험이다.
-# 주장은 "우리 아키텍처가 다른 아키텍처보다 낫다" 가 아니라 "시간 인코더에 스펙트로템포럴
-# 브랜치를 더하면 좋아진다" 이므로, 2D 백본을 바꿔 가며 그 이득이 백본 선택에 의존하지 않음을
-# 보이는 편이 standalone 베이스라인과 경쟁하는 것보다 주장에 맞는다.
+# ----------------------------------------------------- swapping the image backbone
+# This is the ablation the paper rests on. The claim is not that this architecture beats
+# other architectures; it is that adding a spectrotemporal branch to a temporal encoder
+# helps. Holding the temporal branch fixed and swapping the image backbone tests exactly
+# that, and the temporal branch costs the same 564,111 parameters whichever backbone is
+# underneath, so capacity is held constant too.
 
 def _fusion_with(backbone):
     def f(num_classes, **kw):
@@ -442,7 +457,7 @@ def _image_with(backbone):
     return f
 
 
-#: 교체해 볼 2D 백본. EfficientNet-B0 이 논문 구성이다.
+#: Backbones to swap in. EfficientNet-B0 is the published configuration.
 ABLATION_BACKBONES = {
     "resnet18": "resnet18",
     "mobilenet": "mobilenetv3_large_100",

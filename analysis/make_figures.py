@@ -1,18 +1,24 @@
-# 응답 letter 와 원고에 넣을 그림을 만든다. 저자 양식의 R1, R2 번호 체계에 맞춘다.
+# Builds the figures for the response letter, numbered R1, R2, R3 to keep them clear of the
+# manuscript's own figure numbers.
 """
-만드는 것.
+What it makes.
 
-  FigR1  환자 단위 교차검증 — 구성별 정확도와 fold 간 95% CI, 두 기준선을 함께 표시
-  FigR2  창 겹침 유무 비교 — 겹침을 없애도 성능이 떨어지지 않음을 보인다 (R2-M1)
-  FigR3  2D 백본 교체 ablation — 백본이 달라도 2D->융합 이득이 반복됨을 보인다 (R1-M5, R2-M4)
+  FigR1  Patient-level cross-validation: accuracy per configuration with 95% CIs across
+         folds, and both baselines drawn in.
+  FigR2  Overlapping versus non-overlapping windows: removing the overlap does not cost
+         performance.
+  FigR3  Swapping the image backbone: the gain from adding the temporal branch recurs
+         whichever backbone is underneath.
 
-그림 설계에서 지킨 것.
-  - 기준선을 항상 같이 그린다. 없으면 절대 수치를 해석할 수 없다.
-  - 오차 막대는 fold 간 95% CI 다. 세그먼트를 독립으로 본 CI 는 쓰지 않는다(R2-M5).
-  - 색은 구성이 아니라 역할로 준다. 기준선은 회색 점선, 제안 구성만 강조한다.
-  - 흑백 인쇄에서도 읽히도록 마커와 선 스타일을 함께 쓴다.
+Rules the figures follow.
+  - Always draw the baselines. A five-class accuracy is uninterpretable without them.
+  - Error bars are 95% CIs across folds. Never across segments, which are not independent.
+  - Colour encodes role, not identity: baselines grey and dashed, only the proposed
+    configuration emphasised.
+  - Markers and line styles carry the distinction too, so the figures survive a monochrome
+    printer.
 
-사용법.
+Usage.
     python analysis/make_figures.py --out out/figures
 """
 
@@ -34,7 +40,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from analysis.final_report import LABEL, collect  # noqa: E402
 
-# 색은 역할로 준다. 제안 구성만 진하게, 나머지는 중립색.
+# Colour by role: the proposed configuration saturated, everything else neutral.
 C_PROPOSED = "#1f5fa9"
 C_OTHER = "#7f8c9a"
 C_BASE = "#999999"
@@ -59,7 +65,7 @@ def covariate_baseline():
 
 
 def fig_patient_cv(cv_root: Path, out: Path, models=("1d", "2d", "fusion")):
-    """FigR1 — 구성별 환자 단위 정확도. 두 기준선을 같이 그린다."""
+    """FigR1: patient-level accuracy per configuration, with both baselines drawn in."""
     got = [(m, collect(cv_root, "task1", m)) for m in models]
     got = [(m, r) for m, r in got if r]
     if not got:
@@ -101,7 +107,8 @@ def fig_patient_cv(cv_root: Path, out: Path, models=("1d", "2d", "fusion")):
 
 
 def fig_overlap(ov_root: Path, no_root: Path, out: Path):
-    """FigR2 — 겹침 유무. 리뷰어 우려와 달리 성능이 떨어지지 않음을 보인다."""
+    """FigR2: with and without window overlap. Performance does not fall, contrary to the
+    concern that prompted the analysis."""
     models = ["1d", "2d", "fusion"]
     data = []
     for m in models:
@@ -142,20 +149,21 @@ def fig_overlap(ov_root: Path, no_root: Path, out: Path):
 
 
 def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
-    """FigR3 — 백본을 바꿔도 2D->융합 이득이 반복되는가. 논문 주장의 직접 증거."""
+    """FigR3: does the image-to-fusion gain recur across backbones? The paper rests on this."""
     pairs = [("efficientnet_b0", collect(cv_root, "task1", "2d"), collect(cv_root, "task1", "fusion"))]
     for bb in ("resnet18", "mobilenet", "densenet"):
         a, b = collect(bb_root, "task1", f"2d_{bb}"), collect(bb_root, "task1", f"fusion_{bb}")
         if a and b:
             pairs.append((bb, a, b))
-    # fold 가 충분히 쌓이지 않은 쌍은 제외한다. fold 한두 개로 방향을 말하면 안 된다.
+    # Drop pairs that have not accumulated enough folds. One or two folds cannot establish a
+    # direction, and a plot that shows them as if they could is worse than no plot.
     MIN_FOLDS = 10
     dropped = [(n, len(a["folds"]), len(b["folds"])) for n, a, b in pairs
                if a and b and min(len(a["folds"]), len(b["folds"])) < MIN_FOLDS]
     pairs = [(n, a, b) for n, a, b in pairs
              if a and b and min(len(a["folds"]), len(b["folds"])) >= MIN_FOLDS]
     for n, na, nb in dropped:
-        print(f"     [제외] {n}: fold {na}/{nb} — {MIN_FOLDS} 미만이라 그리지 않는다")
+        print(f"     [skipped] {n}: {na}/{nb} folds, below the {MIN_FOLDS} needed to plot")
     if not pairs:
         return None
 
@@ -209,15 +217,16 @@ def main():
     cv, no, bb = Path("out/patient_cv"), Path("out/patient_cv_nonoverlap"), Path("out/backbone_ablation")
     made = []
     for fn, args, name in (
-        (fig_patient_cv, (cv, a.out / "FigR1_patient_cv"), "FigR1 환자 단위 CV"),
-        (fig_overlap, (cv, no, a.out / "FigR2_overlap"), "FigR2 겹침 유무"),
-        (fig_backbone, (cv, bb, a.out / "FigR3_backbone"), "FigR3 백본 ablation"),
+        (fig_patient_cv, (cv, a.out / "FigR1_patient_cv"), "FigR1 patient-level CV"),
+        (fig_overlap, (cv, no, a.out / "FigR2_overlap"), "FigR2 window overlap"),
+        (fig_backbone, (cv, bb, a.out / "FigR3_backbone"), "FigR3 backbone ablation"),
     ):
         r = fn(*args)
-        print(f"  {'O' if r else 'X'}  {name}" + (f" -> {r}.pdf" if r else "  (데이터 부족)"))
+        print(f"  {'ok  ' if r else 'skip'}  {name}"
+              + (f" -> {r}.pdf" if r else "  (not enough data)"))
         if r:
             made.append(r)
-    print(f"\n{len(made)}개 생성: {a.out}")
+    print(f"\nwrote {len(made)} figure(s) to {a.out}")
 
 
 if __name__ == "__main__":
