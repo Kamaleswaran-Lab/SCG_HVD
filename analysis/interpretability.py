@@ -231,21 +231,35 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     if not avail:
         print("  [Grad-CAM] no usable samples"); return None
 
-    fig, axes = plt.subplots(1, len(avail), figsize=(2.5 * len(avail) + 1.2, 3.0))
+    fig, axes = plt.subplots(1, len(avail), figsize=(2.5 * len(avail) + 1.2, 3.4))
     if len(avail) == 1:
         axes = [axes]
     vmax = max(m.max() for m in avail.values())
+    nrow = next(iter(avail.values())).shape[0]
+    # Tick the row edges with the pseudo-frequency they correspond to, so the bands can be
+    # read off the figure instead of only from the caption.
+    edges = [0, nrow // 3, 2 * nrow // 3, nrow]
+    tick_pos = [e - 0.5 for e in edges]
+    def _fmt(hz):
+        return f"{hz:.0f}" if hz >= 10 else f"{hz:.1f}"
+    tick_lab = [_fmt(PSEUDO_FREQ_HZ / max(e * 128 / nrow, 1)) for e in edges]
     for ax, (cls, m) in zip(axes, avail.items()):
         # origin="upper" so the map is oriented like the scalogram it attributes: the
         # generator writes scale 1 (the highest pseudo-frequency) into the top row, which we
         # confirmed against the stored PNGs rather than inferring from the imshow defaults.
         im = ax.imshow(m, aspect="auto", origin="upper", cmap="magma", vmin=0, vmax=vmax)
-        ax.set_title(cls, fontsize=10)
+        ax.set_title(cls, fontsize=10, pad=6)
         ax.set_xlabel("time within window")
-        ax.set_xticks([]); ax.set_yticks([])
-    axes[0].set_ylabel("pseudo-frequency, log-like\n208 Hz (top) to 1.6 Hz (bottom)")
+        ax.set_xticks([])
+        ax.set_yticks(tick_pos)
+        ax.set_yticklabels(tick_lab if ax is axes[0] else [], fontsize=8)
+    axes[0].set_ylabel("pseudo-frequency (Hz)")
     fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalized)")
-    fig.suptitle("Grad-CAM on the shared image backbone, averaged within class", fontsize=11)
+    fig.suptitle("Grad-CAM on the shared image backbone, averaged within class\n"
+                 "(Task I, one trained fold, 15 segments per class)", fontsize=10, y=1.04)
+    # Save the averaged maps so the figure can be redrawn without a GPU.
+    np.savez(out / "task1_fusion_gradcam_maps.npz", **avail)
+
     png = out / "task1_fusion_gradcam.png"
     fig.savefig(png, dpi=200, bbox_inches="tight")
     fig.savefig(str(png).replace(".png", ".pdf"), bbox_inches="tight")
