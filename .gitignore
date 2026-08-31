@@ -20,6 +20,9 @@ data/processed/
 *.npy
 *.mat
 
+# Working notes for the release, not part of the deliverable
+checklist.md
+
 # OS
 .DS_Store
 
