@@ -12,7 +12,10 @@
 #SBATCH --array=0-1
 
 set -euo pipefail
-REPO=${SCG_HVD_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+# Under sbatch the script is copied to a spool directory, so BASH_SOURCE is useless here.
+# SLURM_SUBMIT_DIR is where it was submitted from; fall back to the script location when
+# running this file directly.
+REPO=${SCG_HVD_REPO:-${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}
 PY=${SCG_HVD_PYTHON:-python}
 cd "$REPO"
 
