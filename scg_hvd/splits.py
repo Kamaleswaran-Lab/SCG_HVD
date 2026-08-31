@@ -10,15 +10,15 @@
 
 `segment` exists to reproduce the published figures and must not be read as an estimate of
 generalization. The archived code used it exclusively, and as a consequence 98.96% of Task I
-test segments have a 50%-overlapping neighbour somewhere in training or validation. Call
-`quantify_overlap_leakage()` to measure it again rather than taking our word for it.
+test segments have a 50%-overlapping neighbour somewhere in training or validation.
+`quantify_overlap_leakage()` recomputes that number.
 
-One thing worth spelling out about validation sets. The archived LOOCV harness
-(`evaluate.py:122-131`) read the test patient's label and populated the validation set with
+How the validation set is chosen matters here. The archived LOOCV harness
+(`evaluate.py:122-131`) read the test patient's label and filled the validation set with
 patients carrying that same label, then picked the early-stopping epoch from the resulting
-validation loss. That leaks the test label into model selection. Here the validation patients
-are drawn from the remaining training pool with class balance as the only criterion, and the
-test patient's label is never consulted by any path.
+validation loss, which leaks the test label into model selection. Below, validation patients
+come from the remaining training pool with class balance as the only criterion, and the test
+patient's label is never consulted.
 """
 
 from __future__ import annotations

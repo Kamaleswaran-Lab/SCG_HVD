@@ -7,8 +7,8 @@
     criterion   CrossEntropyLoss(weight=balanced class weights)
     selection   the checkpoint at the highest validation accuracy
 
-One thing is made configurable rather than inherited: `class_weight_scope`. The archived code
-computed class weights over the whole labelled set
+`class_weight_scope` is the one setting made configurable rather than inherited. The archived
+code computed class weights over the whole labelled set
 (`archive/_canonical/1d__hvdnet_model.py:310`), which strictly uses information from outside
 the training split. We measured how much this matters and it is small -- the weights shift by
 0.041% on Task I and 0.52% on Task II -- but the fix is free, so reproduction runs pass "all"

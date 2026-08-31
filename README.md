@@ -38,6 +38,8 @@ with Korean comments.
 
 ## Setup
 
+    git clone https://github.com/Kamaleswaran-Lab/SCG_HVD
+    cd SCG_HVD
     pip install -r requirements.txt
     export SCG_HVD_DATA=/path/to/prepared/data
 
@@ -51,9 +53,11 @@ The index files carry the absolute paths of the machine that built them;
 `scg_hvd.paths.localize` rewrites them onto your root by matching the `Task1/` or `Task2/`
 component, so they do not need editing.
 
-The datasets themselves are not redistributed here. They come from
-[Yang et al.](https://doi.org/10.1038/s41597-021-01046-y) and
-[Kaisti et al.](https://doi.org/10.1109/JBHI.2018.2872984) under their own terms.
+The datasets themselves are not redistributed here. Dataset I is the valvular heart disease
+database of [Yang et al.](https://doi.org/10.3389/fphys.2021.750221) (*Front. Physiol.* 12,
+750221, 2021) and Dataset II comes from
+[Kaisti et al.](https://doi.org/10.1109/jsen.2018.2874706) (*IEEE Sens. J.* 19(1), 234-242,
+2019). Both are distributed by their authors under their own terms.
 
 ## Running things
 

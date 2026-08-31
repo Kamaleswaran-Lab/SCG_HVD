@@ -7,9 +7,9 @@ hard-coded support to recover counts. The round trip loses precision: 17 of the 
 the manuscript's Tables 2 and 3 disagree in the second decimal place, all by 0.015 percentage
 points or less. The AS-TR row of the Task II fusion run, for instance, sums to 1.0001.
 
-Here everything is derived from `y_true` and `y_pred` against an integer confusion matrix. The
-predictions themselves are written to `predictions.csv` so that any metric can be recomputed
-afterwards and so that paired tests are possible at all.
+Here everything is derived from `y_true` and `y_pred` against an integer confusion matrix, and
+the predictions are written to `predictions.csv` so any metric can be recomputed afterwards.
+Paired tests need the raw predictions too.
 
 The Overall row is a micro-average. As Referee 2 pointed out, under that definition
 sensitivity, specificity, accuracy and F1 are algebraically dependent -- see
