@@ -125,12 +125,47 @@ def load_task(task):
     return df, names
 
 
+def plot_beat_aligned(df, out_png, title):
+    """R-peak 정렬 attention 을 클래스별로 그린다. 심장주기 상 위치를 읽을 수 있게 한다."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    classes = sorted(df["class"].unique())
+    fig, axes = plt.subplots(1, len(AXIS_ORDER), figsize=(4.2 * len(AXIS_ORDER), 3.4),
+                             sharey=True)
+    if len(AXIS_ORDER) == 1:
+        axes = [axes]
+    cmap = plt.get_cmap("tab10")
+    for ax, axis in zip(axes, AXIS_ORDER):
+        for i, cls in enumerate(classes):
+            sub = df[(df["class"] == cls) & (df.axis == axis)]
+            if sub.empty:
+                continue
+            ax.plot(sub.t_from_R_sec, sub.attention * 1000, lw=1.4,
+                    color=cmap(i % 10), label=cls)
+        ax.axvline(0, color="k", lw=0.8, ls="--", alpha=0.6)
+        ax.set_title(f"SCG {axis}-axis")
+        ax.set_xlabel("time from R-peak (s)")
+        ax.grid(alpha=0.25, lw=0.5)
+    axes[0].set_ylabel(r"mean attention weight ($\times 10^{-3}$)")
+    axes[-1].legend(frameon=False, fontsize=8, loc="upper right")
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=200, bbox_inches="tight")
+    fig.savefig(str(out_png).replace(".png", ".pdf"), bbox_inches="tight")
+    plt.close(fig)
+    return out_png
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--model", default="1d", choices=["1d", "fusion"])
     ap.add_argument("--ckpt", type=Path, default=None,
                     help="학습된 가중치(.pt). 없으면 무작위 초기화로 배선만 확인한다.")
+    ap.add_argument("--ckpt-dir", type=Path, default=None,
+                    help="fold 디렉터리들의 상위 경로. 첫 model.pt 를 쓴다.")
     ap.add_argument("--n-per-class", type=int, default=40)
     ap.add_argument("--out", type=Path, default=Path("out/interp"))
     a = ap.parse_args()
@@ -139,6 +174,11 @@ def main():
     df, class_names = load_task(a.task)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(a.model, len(class_names)).to(device).eval()
+    if a.ckpt_dir and a.ckpt_dir.exists():
+        found = sorted(a.ckpt_dir.rglob("model.pt"))
+        if found:
+            a.ckpt = found[0]
+            print(f"  체크포인트 {len(found)}개 중 {a.ckpt} 사용")
     if a.ckpt and a.ckpt.exists():
         model.load_state_dict(torch.load(a.ckpt, map_location=device))
         print(f"loaded {a.ckpt}")
@@ -190,8 +230,27 @@ def main():
                     ba.append({"class": cls, "axis": ax, "t_from_R_sec": round(float(ti), 4),
                                "attention": float(v)})
     if ba:
-        pd.DataFrame(ba).to_csv(a.out / f"{a.task}_{a.model}_beat_aligned_attention.csv", index=False)
+        bdf = pd.DataFrame(ba)
+        bdf.to_csv(a.out / f"{a.task}_{a.model}_beat_aligned_attention.csv", index=False)
         print(f"\n  R-peak 정렬 평균 attention 저장 ({len(aligned)} 클래스 x 3 축)")
+        png = plot_beat_aligned(
+            bdf, a.out / f"{a.task}_{a.model}_attention.png",
+            "Attention over the cardiac cycle, averaged within class "
+            f"({a.model} encoder, R-peak aligned)")
+        print(f"  그림 저장: {png}")
+
+        # 수축기(0~0.35 s) 대 나머지 비중 — "어디를 보는가" 를 수치로도 남긴다
+        sys_mask = (bdf.t_from_R_sec >= 0.0) & (bdf.t_from_R_sec <= 0.35)
+        rows = []
+        for (cls, ax_), g in bdf.groupby(["class", "axis"]):
+            tot = g.attention.sum()
+            sysfrac = g[sys_mask.loc[g.index]].attention.sum() / tot if tot else float("nan")
+            rows.append({"class": cls, "axis": ax_, "systolic_fraction": round(sysfrac, 4)})
+        sf = pd.DataFrame(rows)
+        sf.to_csv(a.out / f"{a.task}_{a.model}_systolic_fraction.csv", index=False)
+        print("\n  수축기(R+0~0.35s) attention 비중")
+        print(sf.pivot(index="class", columns="axis", values="systolic_fraction").to_string())
+        print(f"  (창 전체에서 균등하면 0.35/{0.8:.1f} = {0.35/0.8:.3f})")
     print(f"\n결과: {a.out}")
 
 
