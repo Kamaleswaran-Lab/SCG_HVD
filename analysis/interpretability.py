@@ -49,6 +49,9 @@ from scg_hvd.models import build_model  # noqa: E402
 
 DATA = data_root(required=False)
 FS = 256
+#: Pseudo-frequency of CWT scale 1 at the 256 Hz sampling rate; f(s) = this / s.
+PSEUDO_FREQ_HZ = 208.0
+
 AXIS_ORDER = ["z", "x", "y"]   # the order SCGTrunk1D concatenates them in
 
 
@@ -240,7 +243,7 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
         ax.set_title(cls, fontsize=10)
         ax.set_xlabel("time within window")
         ax.set_xticks([]); ax.set_yticks([])
-    axes[0].set_ylabel("pseudo-frequency\n208 Hz (top) to 1.6 Hz (bottom)")
+    axes[0].set_ylabel("pseudo-frequency, log-like\n208 Hz (top) to 1.6 Hz (bottom)")
     fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalized)")
     fig.suptitle("Grad-CAM on the shared image backbone, averaged within class", fontsize=11)
     png = out / "task1_fusion_gradcam.png"
@@ -249,22 +252,47 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     plt.close(fig)
 
     # Bands are named by frequency, not by position in the array. Row 0 of the scalogram is
-    # scale 1, i.e. the highest pseudo-frequency, so the top third is the high-frequency band.
+    # scale 1, the highest pseudo-frequency, so the top rows are the high-frequency band.
     # Naming these by array position is how the first version of this table came out inverted.
+    #
+    # The map is only 7 rows tall (EfficientNet-B0's last conv on a 224 px input), so an even
+    # three-way split is 2/2/3 rows, not 2.33 each. The uniform expectation therefore differs
+    # per band and is reported alongside; assuming 1/3 would overstate the high band and
+    # understate the low one.
     rows = []
     for cls, m in avail.items():
         h = m.shape[0]
-        rows.append({"class": cls,
-                     "high_freq_frac": round(float(m[:h // 3].sum() / m.sum()), 4),
-                     "mid_freq_frac": round(float(m[h // 3:2 * h // 3].sum() / m.sum()), 4),
-                     "low_freq_frac": round(float(m[2 * h // 3:].sum() / m.sum()), 4),
-                     "n_samples": len(maps[cls])})
+        cuts = [(0, h // 3), (h // 3, 2 * h // 3), (2 * h // 3, h)]
+        total = m.sum()
+        rec = {"class": cls}
+        for name, (lo, hi) in zip(("high", "mid", "low"), cuts):
+            frac = float(m[lo:hi].sum() / total)
+            expect = (hi - lo) / h
+            rec[f"{name}_frac"] = round(frac, 4)
+            rec[f"{name}_uniform"] = round(expect, 4)
+            rec[f"{name}_ratio"] = round(frac / expect, 2)
+        rec["n_samples"] = len(maps[cls])
+        rows.append(rec)
     sf = pd.DataFrame(rows)
     sf.to_csv(out / "task1_fusion_gradcam_bands.csv", index=False)
-    print("\n  Grad-CAM contribution by frequency band (0.333 each if uniform)")
-    print("  high = scales 1-42 (~70-208 Hz), low = scales 86-128 (~1.6-2.4 Hz);")
-    print("  the bandpass keeps 1-30 Hz, so the high band is mostly stopband residue.")
-    print(sf.to_string(index=False))
+
+    h = next(iter(avail.values())).shape[0]
+    cuts = [(0, h // 3), (h // 3, 2 * h // 3), (2 * h // 3, h)]
+    print("\n  Grad-CAM contribution by frequency band")
+    print(f"  The map is {h} rows for 128 scales, so each row spans ~{128 / h:.0f} scales and")
+    print("  the three bands hold unequal numbers of rows. `ratio` is frac / uniform: 1.0 means")
+    print("  the band gets exactly its share, above 1 means the model concentrates there.")
+    for name, (lo, hi) in zip(("high", "mid ", "low "), cuts):
+        s_lo = lo * 128 / h + 1
+        s_hi = hi * 128 / h
+        print(f"    {name}  rows {lo}-{hi - 1}  scales {s_lo:5.0f}-{s_hi:3.0f}  "
+              f"{PSEUDO_FREQ_HZ / s_hi:6.1f} - {PSEUDO_FREQ_HZ / s_lo:5.1f} Hz  "
+              f"uniform {(hi - lo) / h:.3f}")
+    print("  The grid is linear in scale and pseudo-frequency goes as 1/scale, so the high band")
+    print("  spans two hundred Hz and the low band under one. Six of the 128 scale rows lie")
+    print("  above the 1-30 Hz passband; the rest of the high band is within it.")
+    print(sf[["class"] + [f"{n}_{k}" for n in ("high", "mid", "low")
+                          for k in ("frac", "ratio")] + ["n_samples"]].to_string(index=False))
     print(f"  wrote {png}")
     return png
 
