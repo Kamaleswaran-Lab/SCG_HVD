@@ -9,6 +9,7 @@ What it makes.
          performance.
   FigR3  Swapping the image backbone: the gain from adding the temporal branch recurs
          whichever backbone is underneath.
+  FigR4  Where the temporal branch attends within the cardiac cycle, per class and axis.
 
 Rules the figures follow.
   - Always draw the baselines. A five-class accuracy is uninterpretable without them.
@@ -208,6 +209,65 @@ def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
     return out
 
 
+def fig_attention(interp_root: Path, out: Path, task="task1"):
+    """FigR4: where the temporal branch attends, relative to the R-peak.
+
+    One number per class and axis: the share of the attention mass falling in the 0 to 0.35 s
+    window after the R-peak. A model attending uniformly over the window would put 0.437 there,
+    which is drawn as the reference line.
+
+    This comes from a single trained fold, so it describes that model rather than establishing
+    a property of the architecture. The figure and the caption both say so.
+    """
+    frames = {}
+    for m in ("1d", "fusion"):
+        f = interp_root / f"{task}_{m}_systolic_fraction.csv"
+        if f.exists():
+            frames[m] = pd.read_csv(f).pivot(index="class", columns="axis",
+                                             values="systolic_fraction")
+    if not frames:
+        return None
+
+    UNIFORM = 0.35 / 0.8
+    fig, axes = plt.subplots(1, len(frames), figsize=(4.2 * len(frames) + 0.6, 3.5),
+                             sharey=True)
+    if len(frames) == 1:
+        axes = [axes]
+    marks = {"x": ("o", C_OTHER), "y": ("s", "#b07a3c"), "z": ("^", C_PROPOSED)}
+    for ax, (m, t) in zip(axes, frames.items()):
+        xs = np.arange(len(t.index))
+        for axis_name in ("x", "y", "z"):
+            if axis_name not in t:
+                continue
+            mk, col = marks[axis_name]
+            ax.plot(xs, t[axis_name].values, mk, ms=7, color=col, ls="-", lw=1.0,
+                    alpha=.85, label=f"SCG {axis_name}", zorder=3)
+        ax.axhline(UNIFORM, color=C_BASE, ls="--", lw=1.3, zorder=2)
+        ax.set_xticks(xs)
+        ax.set_xticklabels(t.index, fontsize=9)
+        ax.set_title(SHORT.get(m, m).replace("\n", " "), fontsize=10)
+        ax.grid(axis="y", alpha=.25, lw=.5, zorder=0)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+    axes[0].set_ylabel("attention mass in systole\n(R+0 to R+0.35 s)")
+    axes[-1].text(len(frames[list(frames)[-1]].index) - 0.6, UNIFORM + .006,
+                  f"uniform ({UNIFORM:.3f})", ha="right", fontsize=8, color="#555")
+    # The legend sits under the axes: inside the panel it lands on the AR points.
+    axes[0].legend(frameon=False, fontsize=8.5, ncol=3, loc="upper center",
+                   bbox_to_anchor=(0.5, -0.12))
+    for ax in axes:
+        lo, hi = ax.get_ylim()
+        ax.set_ylim(lo, hi + 0.02)
+    fig.suptitle("Where the temporal branch attends within the cardiac cycle\n"
+                 "(Task I, one trained fold; descriptive, not a repeated measurement)",
+                 fontsize=10)
+    fig.tight_layout()
+    fig.savefig(out.with_suffix(".png"), dpi=200, bbox_inches="tight")
+    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("out/figures"))
@@ -215,11 +275,13 @@ def main():
     a.out.mkdir(parents=True, exist_ok=True)
 
     cv, no, bb = Path("out/patient_cv"), Path("out/patient_cv_nonoverlap"), Path("out/backbone_ablation")
+    interp = Path("out/interp")
     made = []
     for fn, args, name in (
         (fig_patient_cv, (cv, a.out / "FigR1_patient_cv"), "FigR1 patient-level CV"),
         (fig_overlap, (cv, no, a.out / "FigR2_overlap"), "FigR2 window overlap"),
         (fig_backbone, (cv, bb, a.out / "FigR3_backbone"), "FigR3 backbone ablation"),
+        (fig_attention, (interp, a.out / "FigR4_attention"), "FigR4 attention in systole"),
     ):
         r = fn(*args)
         print(f"  {'ok  ' if r else 'skip'}  {name}"
