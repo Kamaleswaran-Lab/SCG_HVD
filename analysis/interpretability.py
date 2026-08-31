@@ -158,6 +158,89 @@ def plot_beat_aligned(df, out_png, title):
     return out_png
 
 
+def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="cpu"):
+    """융합 모델의 공유 EfficientNet 백본에 Grad-CAM 을 걸어 클래스별 평균 맵을 낸다.
+
+    스칼로그램의 세로축은 CWT 스케일(주파수), 가로축은 시간이다. 따라서 맵을 클래스별로
+    평균하면 "어느 주파수 대역의 어느 시점이 기여하는가" 를 읽을 수 있다.
+
+    주의. 스케일 그리드는 선형(1..128)이고 pseudo-frequency 는 스케일에 반비례하므로
+    세로축은 주파수에 대해 균등하지 않다. 축 라벨에 그 사실을 적는다.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+    from scg_hvd.datasets import build_image_transform
+
+    # 공유 백본의 마지막 합성곱을 찾는다.
+    backbone = model.trunk_2d.shared_backbone
+    target = None
+    for mod in backbone.modules():
+        if isinstance(mod, torch.nn.Conv2d):
+            target = mod
+    if target is None:
+        print("  [Grad-CAM] 합성곱 층을 찾지 못했다"); return None
+
+    cam_engine = GradCAM2D(model, target)
+    tf = build_image_transform()
+    image_dir = Path(image_dir)
+    maps = {c: [] for c in class_names}
+
+    for ci_, cls in enumerate(class_names):
+        sub = df[df.label == ci_].sample(min(n_per_class, int((df.label == ci_).sum())),
+                                         random_state=42)
+        for _, r in sub.iterrows():
+            stem = Path(r.filepath).stem
+            base = image_dir / r.label_name
+            try:
+                ims = [tf(Image.open(base / f"{stem}_{ax}.png").convert("RGB")).unsqueeze(0).to(device)
+                       for ax in ("x", "y", "z")]
+                sig = np.load(r.filepath).astype(np.float32)
+                sig = select_scg_channels(sig)
+                x1 = torch.from_numpy(sig.T.copy()).unsqueeze(0).to(device)
+            except Exception:
+                continue
+            cam = cam_engine((x1, *ims), class_idx=ci_)
+            maps[cls].append(cam[0])
+
+    avail = {c: np.mean(v, axis=0) for c, v in maps.items() if v}
+    if not avail:
+        print("  [Grad-CAM] 사용할 표본이 없다"); return None
+
+    fig, axes = plt.subplots(1, len(avail), figsize=(2.5 * len(avail) + 1.2, 3.0))
+    if len(avail) == 1:
+        axes = [axes]
+    vmax = max(m.max() for m in avail.values())
+    for ax, (cls, m) in zip(axes, avail.items()):
+        im = ax.imshow(m, aspect="auto", origin="lower", cmap="magma", vmin=0, vmax=vmax)
+        ax.set_title(cls, fontsize=10)
+        ax.set_xlabel("time within window")
+        ax.set_xticks([]); ax.set_yticks([])
+    axes[0].set_ylabel("CWT scale\n(low freq. at top)")
+    fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalised)")
+    fig.suptitle("Grad-CAM on the shared image backbone, averaged within class", fontsize=11)
+    png = out / "task1_fusion_gradcam.png"
+    fig.savefig(png, dpi=200, bbox_inches="tight")
+    fig.savefig(str(png).replace(".png", ".pdf"), bbox_inches="tight")
+    plt.close(fig)
+
+    rows = []
+    for cls, m in avail.items():
+        h = m.shape[0]
+        rows.append({"class": cls,
+                     "upper_third_frac": round(float(m[2 * h // 3:].sum() / m.sum()), 4),
+                     "mid_third_frac": round(float(m[h // 3:2 * h // 3].sum() / m.sum()), 4),
+                     "lower_third_frac": round(float(m[:h // 3].sum() / m.sum()), 4),
+                     "n_samples": len(maps[cls])})
+    sf = pd.DataFrame(rows)
+    sf.to_csv(out / "task1_fusion_gradcam_bands.csv", index=False)
+    print("\n  Grad-CAM 스케일 대역별 기여 비중 (균등하면 각 0.333)")
+    print(sf.to_string(index=False))
+    print(f"  그림 저장: {png}")
+    return png
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
@@ -251,6 +334,15 @@ def main():
         print("\n  수축기(R+0~0.35s) attention 비중")
         print(sf.pivot(index="class", columns="axis", values="systolic_fraction").to_string())
         print(f"  (창 전체에서 균등하면 0.35/{0.8:.1f} = {0.35/0.8:.3f})")
+    if a.model == "fusion":
+        print("\n=== Grad-CAM (2D 브랜치) ===")
+        img_dir = DATA / ("Task1_images" if a.task == "task1" else "Task2_images")
+        try:
+            run_gradcam(model, df, class_names, img_dir, a.out,
+                        n_per_class=a.n_per_class // 4 or 5, device=device)
+        except Exception as e:
+            print(f"  [Grad-CAM 실패] {type(e).__name__}: {e}")
+
     print(f"\n결과: {a.out}")
 
 
