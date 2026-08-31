@@ -18,7 +18,10 @@
 #SBATCH --time=24:00:00
 #SBATCH --output=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.out
 #SBATCH --error=/hpc/home/jkim1/workspace/SCG_HVD/logs/%x_%A_%a.err
-#SBATCH --array=0-17
+# DenseNet121 (배열 12-17) 은 2026-08-31 에 취소했다. ResNet18(11.2M) 과
+# MobileNetV3-Large(4.2M) 만으로도 크기가 2.7배 다른 두 백본을 덮으며, 세 번째 백본은
+# 같은 결론에 약 10 GPU-시간을 더 쓰는 것이었다. 다시 돌리려면 --array=12-17 로 제출한다.
+#SBATCH --array=0-11
 
 set -euo pipefail
 REPO=/hpc/home/jkim1/workspace/SCG_HVD
