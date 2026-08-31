@@ -27,7 +27,7 @@ it holds the temporal branch fixed and varies the image backbone.
 
 ## Layout
 
-    scg_hvd/          models, datasets, splits, training loop, metrics
+    scg_hvd/          models, datasets, splits, training loop, metrics, paths
     scripts/          entry points and SLURM submission scripts
     analysis/         the analyses and the figures they produce
     archive/          verbatim copies of the scripts that produced the published numbers

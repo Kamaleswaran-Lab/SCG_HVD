@@ -29,17 +29,10 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 
+from scg_hvd.channels import select_scg_channels
+
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
-
-
-def select_scg_channels(x: np.ndarray) -> np.ndarray:
-    """Pick the three tri-axial SCG columns out of a (T, C) array."""
-    if x.shape[1] == 7:
-        return x[:, 1:4]
-    if x.shape[1] == 12:
-        return x[:, 0:3]
-    raise ValueError(f"unexpected channel count: {x.shape[1]}")
 
 
 def build_image_transform(image_size=224, image_norm="imagenet"):

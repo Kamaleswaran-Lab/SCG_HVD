@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scg_hvd.paths import data_root, localize  # noqa: E402
 
-from scg_hvd.datasets import select_scg_channels  # noqa: E402
+from scg_hvd.channels import select_scg_channels  # noqa: E402
 from scg_hvd.models import build_model  # noqa: E402
 
 DATA = data_root(required=False)
