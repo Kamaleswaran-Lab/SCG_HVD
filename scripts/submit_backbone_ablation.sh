@@ -45,9 +45,11 @@ MODEL="${KIND}_${BB}"
 echo "=== [$i] task1 / $MODEL / seed$SEED on $(hostname) ==="
 $PY -c "
 import sys; sys.path.insert(0,'.')
-from scg_hvd.models import build_model, count_parameters
+from scg_hvd.models import build_model, count_parameters, verify_fusion_increment
 m = build_model('$MODEL', 5)
 print('  parameters', f'{count_parameters(m):,}')
+# The ablation only means something if the temporal branch costs the same everywhere.
+print('  increment per backbone', verify_fusion_increment())
 "
 
 $PY -W ignore scripts/run_patient_cv.py \

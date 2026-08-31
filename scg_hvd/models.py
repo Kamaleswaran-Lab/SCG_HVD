@@ -457,6 +457,36 @@ def _image_with(backbone):
     return f
 
 
+#: The temporal branch costs this much wherever it is attached: the 1D encoder plus the wider
+#: classifier input. Verified identical for every backbone in ABLATION_BACKBONES, which is what
+#: lets the ablation attribute a difference to the branch rather than to capacity.
+FUSION_PARAM_INCREMENT = 564_111
+
+
+def verify_fusion_increment(backbones=None, num_classes=5):
+    """Check that adding the temporal branch costs the same under every image backbone.
+
+    The ablation's whole argument is that only the modality changes. If a backbone swap also
+    changed the size of the increment, a difference in accuracy could be capacity after all.
+    Raises rather than warning, because a silent violation would invalidate the comparison.
+    """
+    # The published configuration is the reference point, so it belongs in the check by
+    # default; ABLATION_BACKBONES holds only the substitutes.
+    names = list(backbones) if backbones else ["efficientnet_b0", *ABLATION_BACKBONES]
+    got = {}
+    for bb in names:
+        pair = (f"2d_{bb}", f"fusion_{bb}") if bb in ABLATION_BACKBONES else ("2d", "fusion")
+        a, b = (count_parameters(build_model(n, num_classes)) for n in pair)
+        got[bb] = b - a
+    bad = {k: v for k, v in got.items() if v != FUSION_PARAM_INCREMENT}
+    if bad:
+        raise AssertionError(
+            f"the temporal branch does not cost the same everywhere: {bad}, "
+            f"expected {FUSION_PARAM_INCREMENT} for all of {names}"
+        )
+    return got
+
+
 #: Backbones to swap in. EfficientNet-B0 is the published configuration.
 ABLATION_BACKBONES = {
     "resnet18": "resnet18",
