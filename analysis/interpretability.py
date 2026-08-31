@@ -233,11 +233,14 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
         axes = [axes]
     vmax = max(m.max() for m in avail.values())
     for ax, (cls, m) in zip(axes, avail.items()):
-        im = ax.imshow(m, aspect="auto", origin="lower", cmap="magma", vmin=0, vmax=vmax)
+        # origin="upper" so the map is oriented like the scalogram it attributes: the
+        # generator writes scale 1 (the highest pseudo-frequency) into the top row, which we
+        # confirmed against the stored PNGs rather than inferring from the imshow defaults.
+        im = ax.imshow(m, aspect="auto", origin="upper", cmap="magma", vmin=0, vmax=vmax)
         ax.set_title(cls, fontsize=10)
         ax.set_xlabel("time within window")
         ax.set_xticks([]); ax.set_yticks([])
-    axes[0].set_ylabel("CWT scale\n(low freq. at top)")
+    axes[0].set_ylabel("pseudo-frequency\n208 Hz (top) to 1.6 Hz (bottom)")
     fig.colorbar(im, ax=axes, fraction=0.02, pad=0.01, label="Grad-CAM (normalized)")
     fig.suptitle("Grad-CAM on the shared image backbone, averaged within class", fontsize=11)
     png = out / "task1_fusion_gradcam.png"
@@ -245,17 +248,22 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     fig.savefig(str(png).replace(".png", ".pdf"), bbox_inches="tight")
     plt.close(fig)
 
+    # Bands are named by frequency, not by position in the array. Row 0 of the scalogram is
+    # scale 1, i.e. the highest pseudo-frequency, so the top third is the high-frequency band.
+    # Naming these by array position is how the first version of this table came out inverted.
     rows = []
     for cls, m in avail.items():
         h = m.shape[0]
         rows.append({"class": cls,
-                     "upper_third_frac": round(float(m[2 * h // 3:].sum() / m.sum()), 4),
-                     "mid_third_frac": round(float(m[h // 3:2 * h // 3].sum() / m.sum()), 4),
-                     "lower_third_frac": round(float(m[:h // 3].sum() / m.sum()), 4),
+                     "high_freq_frac": round(float(m[:h // 3].sum() / m.sum()), 4),
+                     "mid_freq_frac": round(float(m[h // 3:2 * h // 3].sum() / m.sum()), 4),
+                     "low_freq_frac": round(float(m[2 * h // 3:].sum() / m.sum()), 4),
                      "n_samples": len(maps[cls])})
     sf = pd.DataFrame(rows)
     sf.to_csv(out / "task1_fusion_gradcam_bands.csv", index=False)
-    print("\n  Grad-CAM contribution by scale band (0.333 each if uniform)")
+    print("\n  Grad-CAM contribution by frequency band (0.333 each if uniform)")
+    print("  high = scales 1-42 (~70-208 Hz), low = scales 86-128 (~1.6-2.4 Hz);")
+    print("  the bandpass keeps 1-30 Hz, so the high band is mostly stopband residue.")
     print(sf.to_string(index=False))
     print(f"  wrote {png}")
     return png
