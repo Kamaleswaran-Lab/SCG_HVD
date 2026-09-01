@@ -137,12 +137,18 @@ class GradCAM2D:
 
 # ---------------------------------------------------------------- main
 
-def load_task(task):
-    df = pd.read_csv(DATA / "meta" / f"segment_metadata_{task}.csv")
+def load_task(task, root=None):
+    """Load the segment index for a task.
+
+    Resolves the data root itself rather than reading this module's global, so that other
+    scripts can import it without having to reach in and set that global first.
+    """
+    root = Path(root) if root is not None else data_root()
+    df = pd.read_csv(root / "meta" / f"segment_metadata_{task}.csv")
     names = sorted(df.label.unique())
     df["label_name"] = df["label"]
     df["label"] = df["label"].map({n: i for i, n in enumerate(names)})
-    df["filepath"] = localize(df["filepath"], DATA)
+    df["filepath"] = localize(df["filepath"], root)
     return df, names
 
 
@@ -179,7 +185,86 @@ def plot_beat_aligned(df, out_png, title):
     return out_png
 
 
-def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="cpu"):
+#: Band edges in Hz, low to high. Chosen to mean something physically rather than to divide
+#: the image evenly: below 5 Hz is where cardiac wall motion sits, 5-30 Hz is the band the
+#: bandpass retains and where murmur energy would appear, and above 30 Hz is outside the
+#: passband altogether and should be close to empty if the model is using signal.
+BAND_EDGES_HZ = (1.63, 5.0, 30.0, 208.0)
+
+
+def band_fractions(cam, edges_hz=BAND_EDGES_HZ, n_scales=128):
+    """Share of a Grad-CAM map falling in each frequency band, independent of map height.
+
+    Rows of the map stand for CWT scales, and pseudo-frequency goes as the reciprocal of scale,
+    so splitting the rows evenly does not split frequency evenly. Worse, an even row split
+    gives different bands at different map heights, which would make maps from different
+    layers incomparable. This resamples onto the native 128-scale axis first and then cuts at
+    fixed frequencies, so a 7-row map and a 28-row map are measured the same way.
+
+    Returns {band_label: (fraction, uniform_expectation, ratio)}.
+    """
+    cam = np.asarray(cam, dtype=float)
+    h = cam.shape[0]
+    row_energy = cam.sum(axis=1)
+    # Row i of the map covers scales [i*128/h, (i+1)*128/h); spread its energy over them.
+    per_scale = np.zeros(n_scales)
+    for i in range(h):
+        lo = int(np.floor(i * n_scales / h))
+        hi = max(lo + 1, int(np.floor((i + 1) * n_scales / h)))
+        per_scale[lo:hi] += row_energy[i] / (hi - lo)
+
+    scales = np.arange(1, n_scales + 1)
+    freqs = PSEUDO_FREQ_HZ / scales
+    total = per_scale.sum()
+    out = {}
+    for lo_hz, hi_hz in zip(edges_hz[:-1], edges_hz[1:]):
+        m = (freqs >= lo_hz) & (freqs < hi_hz)
+        label = f"{lo_hz:g}-{hi_hz:g}Hz"
+        frac = float(per_scale[m].sum() / total) if total else float("nan")
+        expect = float(m.sum() / n_scales)
+        out[label] = (frac, expect, frac / expect if expect else float("nan"))
+    return out
+
+
+def conv_output_sizes(backbone, device="cpu"):
+    """Every Conv2d in the backbone with the spatial size of its output, for a 224 px input.
+
+    The last convolution gives a 7x7 map, which is seven rows standing for 128 wavelet scales.
+    Earlier stages are coarser in channels but finer in space, and which of them to attribute
+    through is an empirical question rather than a default worth inheriting.
+    """
+    sizes, handles = {}, []
+    for name, mod in backbone.named_modules():
+        if isinstance(mod, torch.nn.Conv2d):
+            handles.append(mod.register_forward_hook(
+                lambda m, i, o, n=name: sizes.__setitem__(n, tuple(o.shape[-2:]))))
+    try:
+        with torch.no_grad():
+            backbone(torch.zeros(1, 3, 224, 224, device=device))
+    finally:
+        for h in handles:
+            h.remove()
+    return sizes
+
+
+def pick_target_layer(backbone, want=None):
+    """The last convolution whose output is `want` x `want`, or the last one overall.
+
+    Passing a size lets the same analysis be repeated at several resolutions; if the class
+    pattern only appears at one of them it is a property of the attribution, not of the model.
+    """
+    sizes = conv_output_sizes(backbone)
+    chosen = None
+    for name, mod in backbone.named_modules():
+        if not isinstance(mod, torch.nn.Conv2d):
+            continue
+        if want is None or sizes.get(name) == (want, want):
+            chosen = mod
+    return chosen
+
+
+def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="cpu",
+                layer_size=None, tag=""):
     """Class-averaged Grad-CAM maps on the fusion model's shared EfficientNet backbone.
 
     The scalogram's vertical axis is CWT scale (so, frequency) and its horizontal axis is
@@ -196,12 +281,8 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     from PIL import Image
     from scg_hvd.datasets import build_image_transform
 
-    # Locate the last convolution in the shared backbone.
     backbone = model.trunk_2d.shared_backbone
-    target = None
-    for mod in backbone.modules():
-        if isinstance(mod, torch.nn.Conv2d):
-            target = mod
+    target = pick_target_layer(backbone, want=layer_size)
     if target is None:
         print("  [Grad-CAM] no convolutional layer found"); return None
 
