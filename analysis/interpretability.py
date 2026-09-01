@@ -226,13 +226,17 @@ def band_fractions(cam, edges_hz=BAND_EDGES_HZ, n_scales=128):
     return out
 
 
-def conv_output_sizes(backbone, device="cpu"):
+def conv_output_sizes(backbone, device=None):
     """Every Conv2d in the backbone with the spatial size of its output, for a 224 px input.
 
     The last convolution gives a 7x7 map, which is seven rows standing for 128 wavelet scales.
     Earlier stages are coarser in channels but finer in space, and which of them to attribute
     through is an empirical question rather than a default worth inheriting.
     """
+    # Take the device from the module rather than defaulting to CPU: the probe tensor has to
+    # live wherever the weights do, and the caller should not have to remember to say so.
+    if device is None:
+        device = next(backbone.parameters()).device
     sizes, handles = {}, []
     for name, mod in backbone.named_modules():
         if isinstance(mod, torch.nn.Conv2d):
