@@ -10,6 +10,7 @@ What it makes.
   FigR3  Swapping the image backbone: the gain from adding the temporal branch recurs
          whichever backbone is underneath.
   FigR4  Where the temporal branch attends within the cardiac cycle, per class and axis.
+  FigR5  The same attention as a curve against time from the R-peak.
 
 Rules the figures follow.
   - Always draw the baselines. A five-class accuracy is uninterpretable without them.
@@ -269,6 +270,56 @@ def fig_attention(interp_root: Path, out: Path, task="task1"):
     return out
 
 
+def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusion"):
+    """FigR5: the attention weight over the cardiac cycle, as a curve rather than a summary.
+
+    The systolic-fraction plot reduces each distribution to one number, which hides the thing
+    worth seeing: where within the beat the weight actually sits. Aligning to the R-peak puts
+    every class on the same axis, so the peak times can be read off directly.
+
+    One trained fold, so this describes that model. The R-peak is a timing reference taken from
+    the ECG in the segment files; it is not part of the model's input.
+    """
+    f = interp_root / f"{task}_{model}_beat_aligned_attention.csv"
+    if not f.exists():
+        return None
+    d = pd.read_csv(f)
+    axes_order = [a for a in ("z", "x", "y") if a in set(d.axis)]
+    classes = sorted(d["class"].unique())
+    cmap = plt.get_cmap("viridis")
+    colors = {c: cmap(i / max(len(classes) - 1, 1) * 0.85) for i, c in enumerate(classes)}
+
+    fig, axs = plt.subplots(1, len(axes_order), figsize=(3.5 * len(axes_order) + 0.8, 3.2),
+                            sharey=True)
+    if len(axes_order) == 1:
+        axs = [axs]
+    for ax, axis_name in zip(axs, axes_order):
+        for cls in classes:
+            g = d[(d["class"] == cls) & (d.axis == axis_name)].sort_values("t_from_R_sec")
+            if g.empty:
+                continue
+            ax.plot(g.t_from_R_sec, g.attention, lw=1.6, color=colors[cls], label=cls,
+                    ls="--" if cls == "N" else "-", zorder=3)
+        ax.axvline(0, color="#444", lw=1.0, zorder=2)
+        ax.axvspan(0, 0.35, color="#999", alpha=.12, zorder=0)
+        ax.set_title(f"SCG {axis_name}", fontsize=10)
+        ax.set_xlabel("time from R-peak (s)")
+        ax.grid(alpha=.2, lw=.5, zorder=0)
+        for sp in ("top", "right"):
+            ax.spines[sp].set_visible(False)
+    axs[0].set_ylabel("mean attention weight")
+    axs[0].text(0.01, 0.97, "R", transform=axs[0].transAxes, fontsize=8, va="top", color="#444")
+    axs[-1].legend(frameon=False, fontsize=8.5, loc="upper right", ncol=2)
+    fig.suptitle("Attention over the cardiac cycle, averaged within class\n"
+                 "(Task I, temporal branch of the fused model, one trained fold; "
+                 "shading marks 0 to 0.35 s after R)", fontsize=10, y=1.06)
+    fig.tight_layout()
+    fig.savefig(out.with_suffix(".png"), dpi=200, bbox_inches="tight")
+    fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
+    plt.close(fig)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("out/figures"))
@@ -285,6 +336,8 @@ def main():
         (fig_overlap, (cv, no, a.out / "FigR2_overlap"), "FigR2 window overlap"),
         (fig_backbone, (cv, bb, a.out / "FigR3_backbone"), "FigR3 backbone ablation"),
         (fig_attention, (interp, a.out / "FigR4_attention"), "FigR4 attention in systole"),
+        (fig_attention_curve, (interp, a.out / "FigR5_attention_curve"),
+         "FigR5 attention over the cardiac cycle"),
     ):
         r = fn(*args)
         print(f"  {'ok  ' if r else 'skip'}  {name}"
