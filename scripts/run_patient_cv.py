@@ -86,10 +86,27 @@ def main():
                     help="use non-overlapping windows only")
     ap.add_argument("--save-checkpoint", action="store_true",
                     help="keep the best weights per fold, for the interpretability analysis")
+    ap.add_argument("--shuffle-labels", action="store_true",
+                    help="permute labels within each patient group; a control, not an experiment")
     a = ap.parse_args()
 
     df, class_names = load_task(a.task, nonoverlap=a.nonoverlap)
     n_classes = len(class_names)
+
+    if a.shuffle_labels:
+        # Permute the label assigned to each patient, keeping every patient's segments
+        # consistent with one another. Shuffling per segment instead would leave a patient
+        # holding several labels, which no real split does and which the model could exploit.
+        # The point of the control is a model that has fitted something but nothing about the
+        # classes, so that an attribution method run on it shows what that method produces in
+        # the absence of class structure.
+        rng = np.random.default_rng(12345)
+        pt = df.groupby("patient_id").label.agg(lambda x: x.value_counts().idxmax())
+        permuted = dict(zip(pt.index, rng.permutation(pt.values)))
+        df["label"] = df.patient_id.map(permuted)
+        moved = int((pt.values != np.array([permuted[i] for i in pt.index])).sum())
+        print(f"  [control] labels permuted across patients: {moved} of {len(pt)} changed\n",
+              flush=True)
     # With a single seed, put it in the output path so parallel array tasks do not collide.
     root = a.out / a.task / a.model
     if len(a.seeds) == 1:
