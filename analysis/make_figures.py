@@ -271,40 +271,49 @@ def fig_attention(interp_root: Path, out: Path, task="task1"):
 
 
 def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusion"):
-    """FigR5: the attention weight over the cardiac cycle, as a curve rather than a summary.
+    """FigR5: attention over the cardiac cycle, averaged within class, across seeds.
 
-    The systolic-fraction plot reduces each distribution to one number, which hides the thing
-    worth seeing: where within the beat the weight actually sits. Aligning to the R-peak puts
-    every class on the same axis, so the peak times can be read off directly.
-
-    One trained fold, so this describes that model. The R-peak is a timing reference taken from
-    the ECG in the segment files; it is not part of the model's input.
+    One trained model describes that model. Three, trained on different seeds and therefore on
+    different fold partitions, say something about the architecture. The solid line is the mean
+    over seeds and the band is their full range, so how much of the shape is stable and how much
+    is the particular model is visible rather than asserted.
     """
-    f = interp_root / f"{task}_{model}_beat_aligned_attention.csv"
-    if not f.exists():
+    frames = []
+    for d in sorted(interp_root.glob("seed*")):
+        f = d / f"{task}_{model}_beat_aligned_attention.csv"
+        if f.exists():
+            g = pd.read_csv(f); g["seed"] = d.name
+            frames.append(g)
+    if not frames:
         return None
-    d = pd.read_csv(f)
+    d = pd.concat(frames)
+    n_seeds = d.seed.nunique()
+
     axes_order = [a for a in ("z", "x", "y") if a in set(d.axis)]
     classes = sorted(d["class"].unique())
     cmap = plt.get_cmap("viridis")
     colors = {c: cmap(i / max(len(classes) - 1, 1) * 0.85) for i, c in enumerate(classes)}
 
-    fig, axs = plt.subplots(1, len(axes_order), figsize=(3.5 * len(axes_order) + 0.8, 3.2),
+    fig, axs = plt.subplots(1, len(axes_order), figsize=(3.5 * len(axes_order) + 0.8, 3.3),
                             sharey=True)
     if len(axes_order) == 1:
         axs = [axs]
     for ax, axis_name in zip(axs, axes_order):
+        sub = d[d.axis == axis_name]
         for cls in classes:
-            g = d[(d["class"] == cls) & (d.axis == axis_name)].sort_values("t_from_R_sec")
+            g = sub[sub["class"] == cls]
             if g.empty:
                 continue
-            ax.plot(g.t_from_R_sec, g.attention, lw=1.6, color=colors[cls], label=cls,
+            piv = g.pivot_table(index="t_from_R_sec", columns="seed", values="attention")
+            t = piv.index.values
+            ax.fill_between(t, piv.min(axis=1), piv.max(axis=1),
+                            color=colors[cls], alpha=.15, lw=0, zorder=2)
+            ax.plot(t, piv.mean(axis=1), lw=1.6, color=colors[cls], label=cls,
                     ls="--" if cls == "N" else "-", zorder=3)
         ax.axvline(0, color="#444", lw=1.0, zorder=2)
-        ax.axvspan(0, 0.35, color="#999", alpha=.12, zorder=0)
-        # The weights are a softmax over the window's 2560 samples, so uniform attention is
-        # 1/2560. Without that reference the vertical axis has no scale a reader can use.
-        ax.axhline(1.0 / 2560, color="#c0392b", ls=":", lw=1.3, zorder=2)
+        ax.axvspan(0, 0.35, color="#999", alpha=.10, zorder=0)
+        # Weights are a softmax over the window's 2560 samples, so uniform is 1/2560.
+        ax.axhline(1.0 / 2560, color="#c0392b", ls=":", lw=1.2, zorder=2)
         ax.set_title(f"SCG {axis_name}", fontsize=10)
         ax.set_xlabel("time from R-peak (s)")
         ax.grid(alpha=.2, lw=.5, zorder=0)
@@ -315,8 +324,8 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
                     textcoords="offset points", fontsize=7.5, color="#c0392b", va="bottom")
     axs[-1].legend(frameon=False, fontsize=8.5, loc="upper right", ncol=2)
     fig.suptitle("Attention against time from the R-peak, averaged within class\n"
-                 "(Task I, temporal branch of the fused model, one trained fold; dotted line "
-                 "is uniform attention, shading marks 0 to 0.35 s)", fontsize=10, y=1.06)
+                 f"(Task I, temporal branch of the fused model; line is the mean over "
+                 f"{n_seeds} seeds, band their range)", fontsize=10, y=1.05)
     fig.tight_layout()
     fig.savefig(out.with_suffix(".png"), dpi=200, bbox_inches="tight")
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
