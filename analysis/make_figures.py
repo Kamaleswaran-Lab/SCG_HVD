@@ -302,17 +302,21 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
                     ls="--" if cls == "N" else "-", zorder=3)
         ax.axvline(0, color="#444", lw=1.0, zorder=2)
         ax.axvspan(0, 0.35, color="#999", alpha=.12, zorder=0)
+        # The weights are a softmax over the window's 2560 samples, so uniform attention is
+        # 1/2560. Without that reference the vertical axis has no scale a reader can use.
+        ax.axhline(1.0 / 2560, color="#c0392b", ls=":", lw=1.3, zorder=2)
         ax.set_title(f"SCG {axis_name}", fontsize=10)
         ax.set_xlabel("time from R-peak (s)")
         ax.grid(alpha=.2, lw=.5, zorder=0)
         for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
     axs[0].set_ylabel("mean attention weight")
-    axs[0].text(0.01, 0.97, "R", transform=axs[0].transAxes, fontsize=8, va="top", color="#444")
+    axs[0].annotate("uniform", xy=(-0.19, 1.0 / 2560), xytext=(0, 3),
+                    textcoords="offset points", fontsize=7.5, color="#c0392b", va="bottom")
     axs[-1].legend(frameon=False, fontsize=8.5, loc="upper right", ncol=2)
-    fig.suptitle("Attention over the cardiac cycle, averaged within class\n"
-                 "(Task I, temporal branch of the fused model, one trained fold; "
-                 "shading marks 0 to 0.35 s after R)", fontsize=10, y=1.06)
+    fig.suptitle("Attention against time from the R-peak, averaged within class\n"
+                 "(Task I, temporal branch of the fused model, one trained fold; dotted line "
+                 "is uniform attention, shading marks 0 to 0.35 s)", fontsize=10, y=1.06)
     fig.tight_layout()
     fig.savefig(out.with_suffix(".png"), dpi=200, bbox_inches="tight")
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
