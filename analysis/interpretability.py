@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scg_hvd.paths import data_root, localize  # noqa: E402
 
+from analysis.extract_heart_rate import ecg_from_segment  # noqa: E402
 from scg_hvd.channels import select_scg_channels  # noqa: E402
 from scg_hvd.models import build_model  # noqa: E402
 
@@ -354,9 +355,14 @@ def main():
             x = torch.from_numpy(scg.T.copy()).unsqueeze(0).to(device)
             with torch.no_grad():
                 model.extract_features(x) if a.model == "1d" else trunk(x)
-            # Detect R-peaks from the ECG so the weights can be aligned to the cardiac cycle
-            ecg_idx = 5 if raw.shape[1] == 12 else 0
-            pk = r_peaks(raw[:, ecg_idx].astype(np.float64))
+            # Detect R-peaks from the ECG so the weights can be aligned to the cardiac cycle.
+            # Use the same lead-selection rule as the heart-rate extraction: pick the usable
+            # derivation rather than assuming a fixed column, which silently ran on a flatlined
+            # lead wherever that column was dead.
+            ecg = ecg_from_segment(raw)
+            if ecg is None:
+                continue
+            pk = r_peaks(ecg)
             for ax, key in zip(AXIS_ORDER, ("branch_z", "branch_x", "branch_y")):
                 w = rec.weights[key][0].numpy()
                 rows.append({"class": cls, "axis": ax,
