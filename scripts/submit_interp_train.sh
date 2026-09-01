@@ -23,10 +23,13 @@ cd "$REPO"
 
 MODELS=(1d fusion)
 MODEL=${MODELS[$SLURM_ARRAY_TASK_ID]}
+# Seed comes from the environment so the same script can build the several seeds the
+# reproducibility check needs, rather than being hardcoded to one.
+SEED=${SEED:-0}
 
-echo "=== interp train: task1 / $MODEL on $(hostname) ==="
+echo "=== interp train: task1 / $MODEL / seed$SEED on $(hostname) ==="
 $PY -W ignore scripts/run_patient_cv.py \
-  --task task1 --model "$MODEL" --folds 5 --seeds 0 --epochs 25 \
+  --task task1 --model "$MODEL" --folds 5 --seeds "$SEED" --epochs 25 \
   --num-workers 8 --save-checkpoint \
   --out "$REPO/out/interp_train"
 echo "=== done ==="
