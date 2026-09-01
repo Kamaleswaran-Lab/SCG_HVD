@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import cohen_kappa_score, confusion_matrix
 
 
 def per_class_metrics(y_true, y_pred, class_names) -> pd.DataFrame:
@@ -78,6 +78,17 @@ def metrics_table(y_true, y_pred, class_names) -> pd.DataFrame:
     pc = per_class_metrics(y_true, y_pred, class_names)
     ov = pd.DataFrame([overall_metrics(y_true, y_pred, len(class_names))])
     return pd.concat([pc, ov], ignore_index=True)
+
+
+def kappa(y_true, y_pred) -> float:
+    """Cohen's kappa: agreement corrected for what chance alone would produce.
+
+    Reported alongside accuracy and macro F1 because the three disagree in an informative way
+    here. Accuracy and kappa weight samples, macro F1 weights classes equally, so a model that
+    gains on the large classes and loses on the small ones moves them in opposite directions.
+    A model that always answers the majority class scores 0.
+    """
+    return float(cohen_kappa_score(y_true, y_pred))
 
 
 def majority_baseline(y_true, class_names) -> dict:

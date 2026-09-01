@@ -38,7 +38,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scg_hvd.metrics import (  # noqa: E402
-    macro_metrics, majority_baseline, mcnemar_paired, metrics_table,
+    kappa, macro_metrics, majority_baseline, mcnemar_paired, metrics_table,
 )
 
 ORDER = ["1d", "2d", "fusion", "temporal_matched", "resnet1d_matched", "tcn_matched"]
@@ -80,6 +80,7 @@ def rebuild_from_folds(seed_dir: Path):
             "segment_macro_f1": macro_metrics(seg.y_true.values, seg.y_pred.values, cn)["macro_f1"],
             "patient_accuracy": float((pat.y_pred == pat.y_true).mean()),
             "patient_macro_f1": macro_metrics(pat.y_true.values, pat.y_pred.values, cn)["macro_f1"],
+            "patient_kappa": kappa(pat.y_true.values, pat.y_pred.values),
             "majority_accuracy": majority_baseline(pat.y_true.values, cn)["accuracy_plain"],
         })
         pats.append(pat.assign(seed=seed, fold=fold))
@@ -88,12 +89,39 @@ def rebuild_from_folds(seed_dir: Path):
     return pd.DataFrame(rows), (pd.concat(pats, ignore_index=True) if pats else None)
 
 
+def _backfill(f: pd.DataFrame, seed_dir: Path) -> pd.DataFrame:
+    """Add metrics a cached fold_summary predates, recomputing them from the predictions.
+
+    Summaries written before a metric existed do not have its column, and re-running the
+    cross-validation to regenerate them would be both expensive and, once the source data has
+    been cleared from scratch, impossible. The per-fold `patient_predictions.csv` is the record
+    those summaries were derived from, so recomputing from it changes nothing that was already
+    reported.
+    """
+    if "patient_kappa" in f.columns:
+        return f
+    vals = {}
+    for fd in sorted(seed_dir.glob("seed*_fold*")):
+        pf = fd / "patient_predictions.csv"
+        m = re.search(r"seed(\d+)_fold(\d+)", fd.name)
+        if not (pf.exists() and m):
+            continue
+        pat = pd.read_csv(pf)
+        vals[(int(m.group(1)), int(m.group(2)))] = kappa(pat.y_true.values, pat.y_pred.values)
+    if not vals:
+        return f
+    f = f.copy()
+    f["patient_kappa"] = [vals.get((int(r.seed), int(r.fold)), float("nan"))
+                          for r in f.itertuples()]
+    return f
+
+
 def collect(root: Path, task: str, model: str):
     base = root / task / model
     folds, pats, names, rebuilt = [], [], None, []
     for d in sorted(base.glob("seed*")):
         if (d / "fold_summary.csv").exists():
-            folds.append(pd.read_csv(d / "fold_summary.csv"))
+            folds.append(_backfill(pd.read_csv(d / "fold_summary.csv"), d))
             if (d / "all_patient_predictions.csv").exists():
                 pats.append(pd.read_csv(d / "all_patient_predictions.csv"))
         else:

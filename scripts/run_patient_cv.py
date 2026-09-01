@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scg_hvd.paths import data_root, localize  # noqa: E402
 
-from scg_hvd.metrics import (aggregate_to_patient, macro_metrics,  # noqa: E402
+from scg_hvd.metrics import (aggregate_to_patient, kappa, macro_metrics,  # noqa: E402
                              majority_baseline, metrics_table)
 from scg_hvd.splits import (check_patient_disjoint, patient_cv_folds,  # noqa: E402
                             quantify_overlap_leakage)
@@ -158,6 +158,7 @@ def main():
                 "segment_overall_se": float(seg_ov.sensitivity),
                 "patient_accuracy": pat_acc,
                 "patient_macro_f1": pat_macro["macro_f1"],
+                "patient_kappa": kappa(pt.y_true.values, pt.y_pred.values),
                 "majority_accuracy": base["accuracy_plain"],
                 "best_val_acc": res["best_val_acc"], "elapsed_sec": res["elapsed_sec"],
             })
@@ -169,7 +170,7 @@ def main():
 
     print(f"\n===== {a.task} / {a.model} summary over {len(fs)} folds =====")
     for col in ["segment_accuracy", "segment_macro_f1", "patient_accuracy",
-                "patient_macro_f1", "majority_accuracy"]:
+                "patient_macro_f1", "patient_kappa", "majority_accuracy"]:
         m, s = fs[col].mean(), fs[col].std()
         lo, hi = m - 1.96 * s / np.sqrt(len(fs)), m + 1.96 * s / np.sqrt(len(fs))
         print(f"  {col:20s} {m:.4f} +/- {s:.4f}   95% CI [{lo:.4f}, {hi:.4f}]")
