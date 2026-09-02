@@ -291,8 +291,18 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
 
     axes_order = [a for a in ("z", "x", "y") if a in set(d.axis)]
     classes = sorted(d["class"].unique())
-    cmap = plt.get_cmap("viridis")
-    colors = {c: cmap(i / max(len(classes) - 1, 1) * 0.85) for i, c in enumerate(classes)}
+    # Colour is tied to the class, not to its position in the list, so adding or dropping a
+    # class never repaints the others. The four lesion hues pass the colour-vision checks as an
+    # adjacent set; the healthy class is the reference and is drawn black and dashed. Line style
+    # varies too, so the panel survives greyscale printing.
+    colors = {"AR": "#0072B2", "AS": "#D55E00", "MR": "#009E73", "MS": "#8E44AD",
+              "N": "#111111"}
+    styles = {"AR": "-", "AS": (0, (5, 1.5)), "MR": (0, (1, 1.2)), "MS": (0, (4, 1.2, 1, 1.2)),
+              "N": (0, (7, 2))}
+    fallback = plt.get_cmap("tab10")
+    for i, c in enumerate(classes):
+        colors.setdefault(c, fallback(i % 10))
+        styles.setdefault(c, "-")
 
     fig, axs = plt.subplots(1, len(axes_order), figsize=(3.5 * len(axes_order) + 0.8, 3.3),
                             sharey=True)
@@ -308,8 +318,8 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
             t = piv.index.values
             ax.fill_between(t, piv.min(axis=1), piv.max(axis=1),
                             color=colors[cls], alpha=.15, lw=0, zorder=2)
-            ax.plot(t, piv.mean(axis=1), lw=1.6, color=colors[cls], label=cls,
-                    ls="--" if cls == "N" else "-", zorder=3)
+            ax.plot(t, piv.mean(axis=1), lw=1.7, color=colors[cls], label=cls,
+                    ls=styles[cls], zorder=4 if cls == "N" else 3)
         ax.axvline(0, color="#444", lw=1.0, zorder=2)
         ax.axvspan(0, 0.35, color="#999", alpha=.10, zorder=0)
         # Weights are a softmax over the window's 2560 samples, so uniform is 1/2560.
