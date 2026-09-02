@@ -27,6 +27,7 @@ Usage.
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import sys
 from pathlib import Path
@@ -39,6 +40,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+
+
+def _use_times():
+    """Match the Times of the manuscript's other figures, which were drawn in MATLAB.
+
+    Times New Roman is not installed here. TeX Gyre Termes ships with TeX Live and is
+    metrically compatible with it, so the glyphs sit at the same widths. If neither is
+    present matplotlib falls back through the list and the figure still renders.
+    """
+    from matplotlib import font_manager as fm
+
+    for otf in glob.glob(str(Path.home() / "texlive" / "*" / "texmf-dist" / "fonts"
+                             / "opentype" / "public" / "tex-gyre" / "texgyretermes-*.otf")):
+        try:
+            fm.fontManager.addfont(otf)
+        except Exception:
+            pass
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Nimbus Roman", "TeX Gyre Termes",
+                       "Liberation Serif", "DejaVu Serif"],
+        "mathtext.fontset": "stix",
+    })
+
+
+_use_times()
 
 from analysis.final_report import collect  # noqa: E402
 
@@ -270,7 +297,8 @@ def fig_attention(interp_root: Path, out: Path, task="task1"):
     return out
 
 
-def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusion"):
+def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusion",
+                        title=True):
     """FigR5: attention over the cardiac cycle, averaged within class, across seeds.
 
     One trained model describes that model. Three, trained on different seeds and therefore on
@@ -304,7 +332,9 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
         colors.setdefault(c, fallback(i % 10))
         styles.setdefault(c, "-")
 
-    fig, axs = plt.subplots(1, len(axes_order), figsize=(3.5 * len(axes_order) + 0.8, 3.3),
+    # Sized close to the text width it is printed at, so the labels are not shrunk to
+    # illegibility by \includegraphics scaling.
+    fig, axs = plt.subplots(1, len(axes_order), figsize=(2.35 * len(axes_order) + 0.5, 2.6),
                             sharey=True)
     if len(axes_order) == 1:
         axs = [axs]
@@ -333,9 +363,11 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
     axs[0].annotate("uniform", xy=(-0.19, 1.0 / 2560), xytext=(0, 3),
                     textcoords="offset points", fontsize=7.5, color="#c0392b", va="bottom")
     axs[-1].legend(frameon=False, fontsize=8.5, loc="upper right", ncol=2)
-    fig.suptitle("Attention against time from the R-peak, averaged within class\n"
-                 f"(Task I, temporal branch of the fused model; line is the mean over "
-                 f"{n_seeds} seeds, band their range)", fontsize=10, y=1.05)
+    # The manuscript carries this in the LaTeX caption, so the in-figure title is optional.
+    if title:
+        fig.suptitle("Attention against time from the R-peak, averaged within class\n"
+                     f"(Task I, temporal branch of the fused model; line is the mean over "
+                     f"{n_seeds} seeds, band their range)", fontsize=10, y=1.05)
     fig.tight_layout()
     fig.savefig(out.with_suffix(".png"), dpi=200, bbox_inches="tight")
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
