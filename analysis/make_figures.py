@@ -260,7 +260,7 @@ def fig_attention(interp_root: Path, out: Path, task="task1"):
                              sharey=True)
     if len(frames) == 1:
         axes = [axes]
-    marks = {"x": ("o", C_OTHER), "y": ("s", "#b07a3c"), "z": ("^", C_PROPOSED)}
+    marks = {"x": ("o", C_A), "y": ("s", "#b07a3c"), "z": ("^", C_B)}
     for ax, (m, t) in zip(axes, frames.items()):
         xs = np.arange(len(t.index))
         for axis_name in ("x", "y", "z"):

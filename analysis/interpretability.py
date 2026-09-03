@@ -106,13 +106,28 @@ def beat_aligned(weights, peaks, win=(-0.2, 0.6), fs=FS):
 # ---------------------------------------------------------------- Grad-CAM
 
 class GradCAM2D:
-    """Grad-CAM on the last convolution of the shared EfficientNet backbone."""
+    """Grad-CAM on the last convolution of the shared EfficientNet backbone.
 
-    def __init__(self, model, target_layer):
-        self.model, self.act, self.grad = model, None, None
-        target_layer.register_forward_hook(lambda m, i, o: setattr(self, "act", o))
-        target_layer.register_full_backward_hook(
-            lambda m, gi, go: setattr(self, "grad", go[0]))
+    The backbone is one module called once per axis, so a single activation slot would not do.
+    Forward hooks fire in axis order and backward hooks fire in reverse, so the two are recorded
+    as lists and reversed into correspondence; keeping only the last of each would pair the z
+    activation with the x gradient and give a map that belongs to no axis.
+    """
+
+    def __init__(self, model, target_layer, axis=0):
+        self.model, self.axis = model, axis
+        self.acts, self.grads = [], []
+        self.handles = [
+            target_layer.register_forward_hook(
+                lambda m, i, o: self.acts.append(o)),
+            target_layer.register_full_backward_hook(
+                lambda m, gi, go: self.grads.append(go[0])),
+        ]
+
+    def close(self):
+        for h in self.handles:
+            h.remove()
+        self.handles = []
 
     def __call__(self, inputs, class_idx=None):
         # cuDNN refuses to run RNN backward on a module in eval mode, and the temporal branch
@@ -128,9 +143,14 @@ class GradCAM2D:
         # logit tensor fails inside gather.
         idx = (out.argmax(1) if class_idx is None
                else torch.as_tensor([class_idx], device=out.device))
+        self.acts.clear(); self.grads.clear()
         out.gather(1, idx.view(-1, 1).to(out.device)).sum().backward()
-        w = self.grad.mean(dim=(2, 3), keepdim=True)
-        cam = F.relu((w * self.act).sum(1))
+        acts, grads = self.acts, list(reversed(self.grads))
+        if len(acts) != len(grads):
+            raise RuntimeError(f"hook fires disagree: {len(acts)} forward, {len(grads)} backward")
+        act, grad = acts[self.axis], grads[self.axis]
+        w = grad.mean(dim=(2, 3), keepdim=True)
+        cam = F.relu((w * act).sum(1))
         cam = cam / (cam.amax(dim=(1, 2), keepdim=True) + 1e-8)
         return cam.detach().cpu().numpy()
 
@@ -290,7 +310,8 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
     if target is None:
         print("  [Grad-CAM] no convolutional layer found"); return None
 
-    cam_engine = GradCAM2D(model, target)
+    # Images are passed in the order (x, y, z), so index 0 attributes to the x scalogram.
+    cam_engine = GradCAM2D(model, target, axis=0)
     tf = build_image_transform()
     image_dir = Path(image_dir)
     maps = {c: [] for c in class_names}

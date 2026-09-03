@@ -59,7 +59,7 @@ def class_maps(model, df, class_names, image_dir, layer_size, n_per_class, devic
     target = pick_target_layer(model.trunk_2d.shared_backbone, want=layer_size)
     if target is None:
         return None
-    engine = GradCAM2D(model, target)
+    engine = GradCAM2D(model, target, axis=0)   # images are passed as (x, y, z)
     tf = build_image_transform()
     image_dir = Path(image_dir)
     out = {}
