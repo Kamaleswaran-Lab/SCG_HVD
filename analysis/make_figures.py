@@ -69,10 +69,12 @@ _use_times()
 
 from analysis.final_report import collect  # noqa: E402
 
-# Colour by role: the proposed configuration saturated, everything else neutral.
-C_PROPOSED = "#1f5fa9"
-C_OTHER = "#7f8c9a"
-C_BASE = "#999999"
+# One accent for the condition under test, one neutral for what it is compared against, and a
+# grey for reference lines. Colour carries the comparison, not emphasis: the fused model is not
+# painted differently from the encoders it is being compared with.
+C_A = "#4c4c4c"        # first condition
+C_B = "#0072B2"        # second condition
+C_BASE = "#9a9a9a"     # baselines and reference lines
 SHORT = {
     "1d": "Temporal\n(1D)", "2d": "Image\n(2D)", "fusion": "Dual-domain\n(1D+2D)",
     "temporal_matched": "Temporal\nmatched", "resnet1d_matched": "1D ResNet\nmatched",
@@ -94,38 +96,39 @@ def covariate_baseline():
 
 
 def fig_patient_cv(cv_root: Path, out: Path, models=("1d", "2d", "fusion")):
-    """FigR1: patient-level accuracy per configuration, with both baselines drawn in."""
+    """FigR1: patient-level accuracy per configuration against the two baselines.
+
+    The table beside this figure already gives the numbers, so the figure is here for the one
+    thing a table shows badly: how far the intervals overlap each other and how far all three
+    sit above the baselines. Nothing is annotated that the table already states.
+    """
     got = [(m, collect(cv_root, "task1", m)) for m in models]
     got = [(m, r) for m, r in got if r]
     if not got:
         return None
-    fig, ax = plt.subplots(figsize=(1.55 * len(got) + 2.6, 3.6))
-    xs, maj = np.arange(len(got)), []
+    fig, ax = plt.subplots(figsize=(0.95 * len(got) + 2.5, 2.9))
+    maj = []
     for i, (m, r) in enumerate(got):
         mu, h = ci(r["folds"].patient_accuracy)
         maj.append(r["folds"].majority_accuracy.mean())
-        col = C_PROPOSED if m == "fusion" else C_OTHER
-        ax.bar(i, mu, 0.6, color=col, alpha=.85, zorder=3)
-        ax.errorbar(i, mu, yerr=h, fmt="none", ecolor="black", capsize=4, lw=1.2, zorder=4)
-        ax.text(i, mu + h + .012, f"{mu:.3f}", ha="center", fontsize=9, zorder=5)
+        ax.errorbar(i, mu, yerr=h, fmt="o", ms=6, color=C_B, ecolor=C_B,
+                    capsize=4, lw=1.3, zorder=4)
 
     mb = float(np.mean(maj))
-    ax.axhline(mb, color=C_BASE, ls="--", lw=1.3, zorder=2)
-    ax.text(len(got) - .45, mb + .006, f"majority class ({mb:.3f})",
-            ha="right", fontsize=8, color="#555")
     cb = covariate_baseline()
-    if cb:
-        ax.axhline(cb, color=C_BASE, ls=":", lw=1.3, zorder=2)
-        ax.text(len(got) - .45, cb + .006, f"age + sex + HR only ({cb:.3f})",
-                ha="right", fontsize=8, color="#555")
+    for y, ls, lab in ((mb, "--", "majority class"), (cb, ":", "covariates only")):
+        if y is None:
+            continue
+        ax.axhline(y, color=C_BASE, ls=ls, lw=1.1, zorder=2)
+        ax.text(len(got) - 0.42, y, f" {lab}", ha="left", va="center",
+                fontsize=8, color="#555")
 
-    ax.set_xticks(xs)
+    ax.set_xticks(range(len(got)))
     ax.set_xticklabels([SHORT.get(m, m) for m, _ in got], fontsize=9)
+    ax.set_xlim(-0.5, len(got) - 0.45)
     ax.set_ylabel("patient-level accuracy")
-    ax.set_ylim(0, max(0.85, max(ci(r["folds"].patient_accuracy)[0] for _, r in got) + .12))
-    ax.set_title("Patient-level cross-validation, Task I\n"
-                 "(5-fold $\\times$ 3 seeds; bars are 95% CI across folds)", fontsize=10)
-    ax.grid(axis="y", alpha=.25, lw=.5, zorder=0)
+    ax.set_ylim(0.30, 0.78)
+    ax.grid(axis="y", alpha=.2, lw=.5, zorder=0)
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
     fig.tight_layout()
@@ -134,10 +137,13 @@ def fig_patient_cv(cv_root: Path, out: Path, models=("1d", "2d", "fusion")):
     plt.close(fig)
     return out
 
-
 def fig_overlap(ov_root: Path, no_root: Path, out: Path):
-    """FigR2: with and without window overlap. Performance does not fall, contrary to the
-    concern that prompted the analysis."""
+    """FigR2: patient-level accuracy with and without window overlap.
+
+    Paired within configuration, so the eye compares the two conditions rather than the three
+    models. The point the analysis makes is that no configuration falls; the figure shows that
+    and leaves the reader to judge the intervals.
+    """
     models = ["1d", "2d", "fusion"]
     data = []
     for m in models:
@@ -147,27 +153,29 @@ def fig_overlap(ov_root: Path, no_root: Path, out: Path):
                          a["folds"].majority_accuracy.mean()))
     if not data:
         return None
-    fig, ax = plt.subplots(figsize=(1.7 * len(data) + 2.4, 3.6))
-    w, xs = 0.34, np.arange(len(data))
+    fig, ax = plt.subplots(figsize=(1.05 * len(data) + 2.6, 2.9))
+    d = 0.15
     for i, (m, (m1, h1), (m2, h2), _) in enumerate(data):
-        ax.bar(i - w / 2, m1, w, yerr=h1, capsize=3.5, color=C_OTHER, alpha=.85,
-               label="overlapping windows" if i == 0 else None, zorder=3,
-               error_kw=dict(lw=1.1))
-        ax.bar(i + w / 2, m2, w, yerr=h2, capsize=3.5, color=C_PROPOSED, alpha=.85,
-               label="non-overlapping windows" if i == 0 else None, zorder=3,
-               error_kw=dict(lw=1.1))
-    mb = float(np.mean([d[3] for d in data]))
-    ax.axhline(mb, color=C_BASE, ls="--", lw=1.3, zorder=2)
-    ax.text(len(data) - .55, mb + .006, f"majority class ({mb:.3f})",
-            ha="right", fontsize=8, color="#555")
-    ax.set_xticks(xs)
+        ax.errorbar(i - d, m1, yerr=h1, fmt="o", ms=6, color=C_A, ecolor=C_A,
+                    capsize=4, lw=1.3, zorder=4,
+                    label="overlapping windows" if i == 0 else None)
+        ax.errorbar(i + d, m2, yerr=h2, fmt="s", ms=6, color=C_B, ecolor=C_B,
+                    capsize=4, lw=1.3, zorder=4,
+                    label="every second window" if i == 0 else None)
+        ax.plot([i - d, i + d], [m1, m2], color="#bbb", lw=1.0, zorder=3)
+
+    mb = float(np.mean([x[3] for x in data]))
+    ax.axhline(mb, color=C_BASE, ls="--", lw=1.1, zorder=2)
+    ax.text(len(data) - 0.42, mb, " majority class", ha="left", va="center",
+            fontsize=8, color="#555")
+
+    ax.set_xticks(range(len(data)))
     ax.set_xticklabels([SHORT.get(m, m) for m, *_ in data], fontsize=9)
+    ax.set_xlim(-0.5, len(data) - 0.45)
     ax.set_ylabel("patient-level accuracy")
-    ax.set_ylim(0, .88)
-    ax.set_title("Removing window overlap does not reduce performance\n"
-                 "(Task I, patient-level; training data halved in the right bars)", fontsize=10)
-    ax.legend(frameon=False, fontsize=8.5, loc="upper left")
-    ax.grid(axis="y", alpha=.25, lw=.5, zorder=0)
+    ax.set_ylim(0.30, 0.80)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left", handletextpad=.5)
+    ax.grid(axis="y", alpha=.2, lw=.5, zorder=0)
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
     fig.tight_layout()
@@ -176,15 +184,20 @@ def fig_overlap(ov_root: Path, no_root: Path, out: Path):
     plt.close(fig)
     return out
 
-
 def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
-    """FigR3: does the image-to-fusion gain recur across backbones? The paper rests on this."""
-    pairs = [("efficientnet_b0",
+    """FigR3: the image-to-fusion step, repeated with the image backbone varied.
+
+    Drawn as a paired shift within each backbone, because the claim is about the direction of
+    the step and not about which backbone is best. The step costs the same 564,111 parameters
+    in every case, so the comparison is of the branch and not of capacity.
+    """
+    pairs = [("EfficientNet-B0",
               collect(cv_root, "task1", "2d"), collect(cv_root, "task1", "fusion"))]
-    for bb in ("resnet18", "mobilenet", "densenet"):
-        a, b = collect(bb_root, "task1", f"2d_{bb}"), collect(bb_root, "task1", f"fusion_{bb}")
+    for key, name in (("resnet18", "ResNet-18"), ("mobilenet", "MobileNetV3"),
+                      ("densenet", "DenseNet")):
+        a, b = collect(bb_root, "task1", f"2d_{key}"), collect(bb_root, "task1", f"fusion_{key}")
         if a and b:
-            pairs.append((bb, a, b))
+            pairs.append((name, a, b))
     # Drop pairs that have not accumulated enough folds. One or two folds cannot establish a
     # direction, and a plot that shows them as if they could is worse than no plot.
     MIN_FOLDS = 10
@@ -197,38 +210,24 @@ def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
     if not pairs:
         return None
 
-    fig, ax = plt.subplots(figsize=(1.9 * len(pairs) + 2.2, 3.8))
-    tops, bots = [], []
+    fig, ax = plt.subplots(figsize=(1.05 * len(pairs) + 2.6, 2.9))
+    d = 0.15
     for i, (name, a, b) in enumerate(pairs):
         m1, h1 = ci(a["folds"].patient_accuracy)
         m2, h2 = ci(b["folds"].patient_accuracy)
-        ax.errorbar([i - .13], [m1], yerr=[h1], fmt="o", ms=7, color=C_OTHER,
-                    capsize=4, lw=1.2, label="2D only" if i == 0 else None, zorder=3)
-        ax.errorbar([i + .13], [m2], yerr=[h2], fmt="s", ms=7, color=C_PROPOSED,
-                    capsize=4, lw=1.2, label="1D + 2D" if i == 0 else None, zorder=3)
-        ax.annotate("", xy=(i + .13, m2), xytext=(i - .13, m1),
-                    arrowprops=dict(arrowstyle="->", color="#444", lw=1.1, alpha=.8), zorder=2)
-        tops.append(max(m1, m2) + max(h1, h2))
-        ax.text(i, max(m1, m2) + max(h1, h2) + .004, f"{m2 - m1:+.3f}",
-                ha="center", va="bottom", fontsize=9,
-                color=C_PROPOSED if m2 > m1 else "#c0392b", zorder=5)
+        ax.errorbar(i - d, m1, yerr=h1, fmt="o", ms=6, color=C_A, ecolor=C_A,
+                    capsize=4, lw=1.3, zorder=4, label="image encoder" if i == 0 else None)
+        ax.errorbar(i + d, m2, yerr=h2, fmt="s", ms=6, color=C_B, ecolor=C_B,
+                    capsize=4, lw=1.3, zorder=4, label="dual-domain" if i == 0 else None)
+        ax.plot([i - d, i + d], [m1, m2], color="#bbb", lw=1.0, zorder=3)
+
     ax.set_xticks(range(len(pairs)))
-    ax.set_xticklabels([f"{n.replace('_','-')}\n({min(len(a['folds']), len(b['folds']))} folds)"
-                        for n, a, b in pairs], fontsize=9)
+    ax.set_xticklabels([n for n, _, _ in pairs], fontsize=9)
+    ax.set_xlim(-0.5, len(pairs) - 0.45)
     ax.set_xlabel("image-branch backbone")
     ax.set_ylabel("patient-level accuracy")
-    n_pos = sum(1 for _, a, b in pairs
-                if ci(b["folds"].patient_accuracy)[0] > ci(a["folds"].patient_accuracy)[0])
-    ax.set_title(f"Effect of adding the temporal branch, by image backbone "
-                 f"({n_pos}/{len(pairs)} positive)\n"
-                 "(Task I, patient-level; +564,111 parameters in every case)", fontsize=10)
-    ax.legend(frameon=False, fontsize=8.5, loc="lower right")
-    ax.grid(axis="y", alpha=.25, lw=.5, zorder=0)
-    ax.set_xlim(-.5, len(pairs) - .5)
-    if tops:
-        lo = min(ci(a["folds"].patient_accuracy)[0] - ci(a["folds"].patient_accuracy)[1]
-                 for _, a, _ in pairs)
-        ax.set_ylim(lo - .02, max(tops) + .035)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left", handletextpad=.5)
+    ax.grid(axis="y", alpha=.2, lw=.5, zorder=0)
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
     fig.tight_layout()
@@ -236,7 +235,6 @@ def fig_backbone(cv_root: Path, bb_root: Path, out: Path):
     fig.savefig(out.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
     return out
-
 
 def fig_attention(interp_root: Path, out: Path, task="task1"):
     """FigR4: where the temporal branch attends, relative to the R-peak.
