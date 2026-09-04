@@ -1,17 +1,16 @@
 # Preparing the data
 
 `SCG_HVD_DATA` points at a directory that this repository reads but does not build. The two
-public releases have to be turned into fixed-length segments and scalogram images first, and
-the scripts that did that are preserved verbatim in `archive/_canonical/`:
+public releases have to be turned into fixed-length segments and scalogram images first, in
+two steps:
 
-| Script | What it does |
+| Step | What it does |
 |---|---|
-| `chunk_10s_overlap.py` | Cuts the resampled recordings into 10 s windows on a 5 s stride and writes the segment index |
-| `generate_images.py` | Renders each segment's three axes as grayscale CWT scalograms |
+| Segmentation | Cuts the resampled recordings into 10 s windows on a 5 s stride and writes the segment index |
+| Scalograms | Renders each segment's three axes as grayscale CWT scalograms |
 
-Both carry absolute paths from the machine they ran on, and neither is parameterized. They are
-here as the record of what was done, not as a pipeline to invoke; adapt the paths at the top if
-you want to rerun them.
+What matters is the result, not how it is produced, so this page states the layout the code
+expects and the details that are easy to get wrong.
 
 ## What the result has to look like
 
@@ -41,6 +40,6 @@ as magnitude with no logarithmic compression, autoscaled per image. They are rep
 three channels at load time. A colormapped variant exists in the original tree but was not used
 for any published result.
 
-**`start_time_sec` has to be exact.** The overlap diagnostics identify neighbouring windows by
+**`start_time_sec` has to be exact.** The overlap diagnostics identify neighboring windows by
 comparing start times to the stride, so an approximate value silently reports no leakage where
 there is plenty.

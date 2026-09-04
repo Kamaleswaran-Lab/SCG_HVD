@@ -273,7 +273,7 @@ def main():
     lines += ["\\hline\\hline", "\\end{tabular}", "\\begin{tablenotes}[flushleft]\\footnotesize",
               "\\item No patient contributes segments to more than one split in any fold, and "
               "no test "
-              "segment has an overlapping neighbour in training or validation; both are "
+              "segment has an overlapping neighbor in training or validation; both are "
               "asserted in "
               "the released code.",
               "\\end{tablenotes}", "\\end{threeparttable}", "\\end{table}"]

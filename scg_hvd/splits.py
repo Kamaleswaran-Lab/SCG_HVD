@@ -4,16 +4,16 @@
 
     segment      Reproduces the published numbers. Stratified over segments, so a patient's
                  windows land in train, val and test alike.
-    patient      A single patient-disjoint split, matching the archived `5_*` runs.
+    patient      A single patient-disjoint split, matching the original `5_*` runs.
     patient_cv   Patient-level stratified group k-fold. The default for the revision.
     loocv        Leave one patient out.
 
 `segment` exists to reproduce the published figures and must not be read as an estimate of
-generalization. The archived code used it exclusively, and as a consequence 98.96% of Task I
-test segments have a 50%-overlapping neighbour somewhere in training or validation.
+generalization. The original code used it exclusively, and as a consequence 98.96% of Task I
+test segments have a 50%-overlapping neighbor somewhere in training or validation.
 `quantify_overlap_leakage()` recomputes that number.
 
-How the validation set is chosen matters here. The archived LOOCV harness
+How the validation set is chosen matters here. The original LOOCV harness
 (`evaluate.py:122-131`) read the test patient's label and filled the validation set with
 patients carrying that same label, then picked the early-stopping epoch from the resulting
 validation loss, which leaks the test label into model selection. Below, validation patients
@@ -57,7 +57,7 @@ def segment_split(df: pd.DataFrame, test_size=0.1, val_size=0.2, random_state=42
     """The segment-level split the paper used, reproduced call for call.
 
     Mirrors the two `train_test_split` calls at `Task1/1_hvdnet/hvdnet_model.py:314-315` in
-    the archive. The outcome can shift between scikit-learn versions, so freeze the result to
+    the original code. The outcome can shift between scikit-learn versions, so freeze the result to
     CSV and load that rather than relying on the seed to be portable.
     """
     trainval, test = train_test_split(
@@ -98,7 +98,7 @@ def singleton_classes(df: pd.DataFrame) -> dict:
 def patient_split(
     df: pd.DataFrame, test_size=0.1, val_size=0.2, random_state=42, singleton_policy="error"
 ) -> pd.DataFrame:
-    """A single patient-disjoint split, following the archived `Task1/5_hvdnet` procedure.
+    """A single patient-disjoint split, following the original `Task1/5_hvdnet` procedure.
 
     singleton_policy
         "error"        raise if any class has a single patient (the default).
@@ -167,7 +167,7 @@ def patient_cv_folds(df: pd.DataFrame, n_splits=5, val_size=0.2, random_state=42
 def loocv_folds(df: pd.DataFrame, val_size=0.15, random_state=42):
     """Leave one patient out. Single-patient classes stay in training and are never tested.
 
-    Unlike the archived harness, the validation patients are not chosen using the test
+    Unlike the original harness, the validation patients are not chosen using the test
     patient's label.
     """
     pt = patient_table(df)
@@ -208,7 +208,7 @@ def check_patient_disjoint(split_df: pd.DataFrame) -> dict:
 
 
 def quantify_overlap_leakage(split_df: pd.DataFrame, stride_sec=5.0, against=("train",)) -> dict:
-    """Fraction of test segments that have a 50%-overlapping neighbour on the training side.
+    """Fraction of test segments that have a 50%-overlapping neighbor on the training side.
 
     Windows are 10 s on a 5 s stride, so two segments of the same patient whose start times
     differ by exactly `stride_sec` share five seconds of raw signal. Reference values from our
@@ -230,6 +230,6 @@ def quantify_overlap_leakage(split_df: pd.DataFrame, stride_sec=5.0, against=("t
         "n_test": n,
         "n_with_overlapping_neighbour": n_with,
         "fraction": n_with / n if n else float("nan"),
-        "neighbour_count_hist": dict(pd.Series(counts).value_counts().sort_index()),
+        "neighbor_count_hist": dict(pd.Series(counts).value_counts().sort_index()),
         "against": list(against),
     }

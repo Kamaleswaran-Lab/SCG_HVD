@@ -1,8 +1,8 @@
 # Datasets for the segment waveforms and their per-axis CWT scalograms, carrying over the
-# preprocessing of the canonical archived scripts unchanged.
+# preprocessing of the original scripts unchanged.
 """
 Which columns hold the SCG channels depends on the source file, and the rule follows the
-canonical script (`archive/_canonical/1d__hvdnet_model.py`):
+original script:
 
     7 columns   Dataset II family  -> SCG in columns 1, 2, 3
     12 columns  Dataset I family   -> SCG in columns 0, 1, 2

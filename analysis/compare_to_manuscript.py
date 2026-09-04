@@ -5,7 +5,7 @@ It serves two purposes.
 1. Confirm that the ported pipeline lands where the manuscript did.
 2. Produce the values that go into the revised tables.
 
-The second matters more than it sounds. The archived pipeline stored each confusion matrix
+The second matters more than it sounds. The original pipeline stored each confusion matrix
 with `normalize='true'` and recovered counts by multiplying back through a hard-coded support;
 that round trip is why 17 of the 120 published cells disagree in the second decimal place.
 Everything here is computed from raw predictions, so a new value differing from the published

@@ -5,10 +5,10 @@ Six things this run is built to get right.
 1. Only the split differs from the published experiment. The model, the preprocessing and the
    optimizer take the same code path as `run_paper_segment.py`, so any difference in
    performance can be attributed to the split by construction rather than by argument.
-2. The validation set never sees the test patients' labels. This is the defect in the archived
+2. The validation set never sees the test patients' labels. This is the defect in the original
    LOOCV harness (`exp_loocv/evaluate.py:122-131`) that we are not repeating.
 3. Class weights come from the training split alone (`class_weight_scope="train"`). The
-   reproduction runs keep the canonical behavior of using everything; new experiments do not.
+   reproduction runs keep the original behavior of using everything; new experiments do not.
 4. Both segment- and patient-level results are written. Clinical diagnosis is per patient, so
    the patient table is the primary one.
 5. The majority-class baseline goes out with every result. Without it the numbers cannot be
@@ -51,7 +51,7 @@ def drop_overlap(df: pd.DataFrame) -> pd.DataFrame:
 
     Windows are 10 s on a 5 s stride, so taking every second segment leaves start times exactly
     10.0 s apart within a patient and no overlap anywhere. Verified on Task I: 8678 -> 4365
-    segments, zero 5 s neighbour pairs, and the per-class patient counts unchanged.
+    segments, zero 5 s neighbor pairs, and the per-class patient counts unchanged.
     """
     idx = df.segment_id.str.extract(r"_seg(\d+)$")[0].astype(int)
     return df[idx % 2 == 0].reset_index(drop=True)

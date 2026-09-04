@@ -8,7 +8,7 @@ Referee 2 minor 7.
 
 The thing the reviewer points at is the attention pooling in the 1D branch, and they are
 right that it is the natural place to look: its weights are a softmax over the time axis, so
-they answer "which parts of the waveform contribute" directly. The archived Grad-CAM script
+they answer "which parts of the waveform contribute" directly. The original Grad-CAM script
 (`exp/Task1/3_hvdnet_fusion_model_LSTM_gradcam/gradcam_analysis.py`) works on the 2D
 scalograms and so does not answer that question. Both are produced here.
 

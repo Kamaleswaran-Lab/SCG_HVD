@@ -30,11 +30,6 @@ it holds the temporal branch fixed and varies the image backbone.
     scg_hvd/          models, datasets, splits, training loop, metrics, paths
     scripts/          entry points and SLURM submission scripts
     analysis/         the analyses and the figures they produce
-    archive/          verbatim copies of the scripts that produced the published numbers
-
-`archive/` is evidence rather than code: those files are kept byte for byte as found, with
-their md5 sums recorded in `archive/README.md`, which is also why they are the only files here
-with Korean comments.
 
 ## Setup
 
@@ -108,10 +103,10 @@ something other than what ran. All four are corrected in the revised manuscript:
 - The paper described a complex Morlet wavelet over 1-30 Hz, power scalograms and an RGB
   colormap. The implementation uses a real Morlet wavelet over scales 1-128 (1.63-208 Hz),
   magnitude, and grayscale.
-- The archived pipeline recovered metrics by multiplying normalized confusion matrices back
+- The original pipeline recovered metrics by multiplying normalized confusion matrices back
   through a hard-coded support. Seventeen of the 120 published cells disagree in the second
   decimal place as a result. `scg_hvd/metrics.py` computes everything from raw predictions.
-- The archived LOOCV harness chose validation patients using the test patient's label.
+- The original LOOCV harness chose validation patients using the test patient's label.
   `scg_hvd/splits.py` does not.
 
 ## Citing

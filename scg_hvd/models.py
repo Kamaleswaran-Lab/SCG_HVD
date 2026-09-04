@@ -1,6 +1,7 @@
-# One definition of the 1D, 2D and fusion models. The archive's fork of near-identical
-# variants stops here.
-"""Ported from the three canonical scripts under `archive/_canonical/`:
+# One definition of the 1D, 2D and fusion models. The original tree forked near-identical
+# variants; this file is the single definition.
+"""Ported from the three original scripts that produced the published numbers, identified
+here by md5 so the port can be checked against them:
 
     1D       1d__hvdnet_model.py             md5 c1bf7a2918d802a948824007a230b051
     2D       2d__hvdnet_fusion_model.py      md5 2c6851b26eda18f556c041ce34e90913
@@ -8,12 +9,12 @@
 
 Two traps caught us during the port, recorded so nobody has to find them twice.
 
-1. The 2D and fusion canonicals define classes with the same names,
+1. The 2D and fusion originals define classes with the same names,
    `MultiEfficientNetFusion` and `OptimizedMultiEfficientNetFusion`. They are not the same
    model: the 2D one has the 1D branch removed, so its classifier takes 126 dimensions where
    the fusion one takes 426. The names are kept distinct here.
-2. The top-level copies in the archive, such as `exp/hvdnet_fusion_model.py`, apply the
-   attention weights twice, `weights * x * weights`. Every canonical used for a published run
+2. The top-level copies in the original tree, such as `exp/hvdnet_fusion_model.py`, apply the
+   attention weights twice, `weights * x * weights`. Every script used for a published run
    applies them once, and so does the implementation below.
 
 Parameter counts, verified against the code. The Shared variants are what actually ran; the
@@ -92,7 +93,7 @@ class SCGBranch(nn.Module):
 class SCGTrunk1D(nn.Module):
     """Encode the three axes separately and concatenate to 300 dimensions.
 
-    The axis order is z, x, y, following the canonical scripts rather than the obvious x, y, z.
+    The axis order is z, x, y, following the original scripts rather than the obvious x, y, z.
     """
 
     def __init__(self, conv_channels=64, lstm_hidden=100):

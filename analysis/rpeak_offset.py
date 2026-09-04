@@ -55,7 +55,7 @@ def offsets(ecg: np.ndarray, peaks, search_ms=60, fs=FS):
     """Signed sample offsets from each detected peak to the nearest dominant QRS deflection.
 
     Positive means the detector fired late. The search window is deliberately narrow: widening
-    it past half a QRS complex would start matching neighbouring waves.
+    it past half a QRS complex would start matching neighboring waves.
     """
     f = bandpassed(ecg, fs)
     half = int(search_ms / 1000 * fs)

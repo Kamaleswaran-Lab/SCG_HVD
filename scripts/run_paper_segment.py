@@ -3,11 +3,11 @@
 """
 What this reproduces is the experiment that produced the published numbers, not an estimate
 of generalization. The split is at segment level, so 98.96% of Task I test segments have a
-50%-overlapping neighbour in training or validation. The run prints that figure alongside the
+50%-overlapping neighbor in training or validation. The run prints that figure alongside the
 results rather than leaving it implicit.
 
 What to expect. Of the 120 published cells, 103 match exactly and 17 differ in the second
-decimal place. The difference comes from the archive storing normalized confusion matrices and
+decimal place. The difference comes from the original code storing normalized confusion matrices and
 multiplying back to recover counts; everything here is computed from raw predictions, so a new
 value differing from the published one is correct rather than a failure. Training randomness
 means cells will not reproduce exactly in any case. The point of the script is to record
@@ -39,7 +39,7 @@ from scg_hvd.train import TrainConfig, run_training  # noqa: E402
 
 DATA = data_root(required=False)
 IMAGE_DIRS = {"task1": DATA / "Task1_images", "task2": DATA / "Task2_images"}
-EPOCHS = {"1d": 25, "2d": 25, "fusion": 25}   # as in the canonical bash_script.sh
+EPOCHS = {"1d": 25, "2d": 25, "fusion": 25}   # as in the original bash_script.sh
 
 
 def load_task(task):
@@ -89,7 +89,7 @@ def main():
     print(f"  {len(df)} segments, {df.patient_id.nunique()} patients, classes {class_names}")
     print(f"  {diag['n_test']} test segments | "
           f"{diag['patients_split_across']} patients span two splits")
-    print(f"  overlapping neighbour, vs train {diag['overlap_vs_train']['fraction']:.4f}, "
+    print(f"  overlapping neighbor, vs train {diag['overlap_vs_train']['fraction']:.4f}, "
           f"train+val {diag['overlap_vs_train_val']['fraction']:.4f}")
     print("  -> this split reproduces the paper; it does not estimate generalization.\n")
 
@@ -100,7 +100,7 @@ def main():
             model=m, num_classes=n_classes,
             epochs=a.epochs or EPOCHS.get(m, 25),
             lr=1e-3, num_workers=a.num_workers, seed=a.seed,
-            class_weight_scope="all",     # as the canonical code did, since this reproduces it
+            class_weight_scope="all",     # as the original code did, since this reproduces it
         )
         out_dir = root / m
         _, (y_true, y_pred, _), res = run_training(
