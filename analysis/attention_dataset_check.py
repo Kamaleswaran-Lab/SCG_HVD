@@ -1,4 +1,4 @@
-# 건강군의 늦은 attention 피크가 생리 신호인지 Dataset II 장비 특성인지 가른다.
+# Splits the healthy class by source dataset to separate physiology from device.
 """Splits the healthy class by source dataset and compares the beat-aligned attention.
 
 Section 4.5 reports that the healthy class carries a second attention peak near 0.4 s while the
@@ -27,7 +27,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from analysis.interpretability import (AXIS_ORDER, FS, AttentionRecorder,  # noqa: E402
+from analysis.interpretability import (FS, AttentionRecorder,  # noqa: E402
                                        beat_aligned, load_task, r_peaks)
 from analysis.extract_heart_rate import ecg_from_segment  # noqa: E402
 from scg_hvd.channels import select_scg_channels  # noqa: E402
@@ -45,13 +45,13 @@ def source_of(patient_id: str) -> str:
 
 
 def main():
-    data_root()
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--ckpt-dir", type=Path, default=Path("out/patient_cv/task1/1d"))
     ap.add_argument("--n-per-patient", type=int, default=12)
     ap.add_argument("--out", type=Path, default=Path("out/interp"))
     a = ap.parse_args()
+    data_root()
     a.out.mkdir(parents=True, exist_ok=True)
 
     df, class_names = load_task(a.task)
@@ -106,8 +106,6 @@ def main():
                          "pre_R_mean": pre, "late_peak": late, "ratio": late / pre,
                          "late_peak_t": float(t[(t > 0.3) & (t < 0.5)][
                              np.argmax(m[(t > 0.3) & (t < 0.5)])])})
-            for ti, v in zip(t, m):
-                pass
     d = pd.DataFrame(rows)
     d.to_csv(a.out / f"{a.task}_healthy_attention_by_source.csv", index=False)
     print("\n=== late attention peak (z axis), healthy class split by source dataset ===")

@@ -1,4 +1,6 @@
 #!/bin/bash
+# Runs the Grad-CAM validation on a GPU node: trained model against the shuffled-label and
+# untrained controls.
 #SBATCH --job-name=scg_gcv
 #SBATCH --partition=gpu-hp
 #SBATCH --qos=duke_h200_hp

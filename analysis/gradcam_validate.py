@@ -41,7 +41,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from analysis.interpretability import (BAND_EDGES_HZ, GradCAM2D,  # noqa: E402
+from analysis.interpretability import (GradCAM2D,  # noqa: E402
                                        band_fractions, load_task, pick_target_layer)
 from scg_hvd.channels import select_scg_channels  # noqa: E402
 from scg_hvd.models import build_model  # noqa: E402
@@ -86,7 +86,6 @@ def class_maps(model, df, class_names, image_dir, layer_size, n_per_class, devic
 
 def main():
     global DATA
-    DATA = data_root()
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--ckpt", type=Path, required=True)
@@ -94,6 +93,7 @@ def main():
     ap.add_argument("--n-per-class", type=int, default=30)
     ap.add_argument("--out", type=Path, default=Path("out/gradcam_val"))
     a = ap.parse_args()
+    DATA = data_root()
     a.out.mkdir(parents=True, exist_ok=True)
 
     df, class_names = load_task(a.task)
