@@ -130,10 +130,10 @@ def build(task: str, out: Path):
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=Path("out/cohort"))
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     a.out.mkdir(parents=True, exist_ok=True)
 
     for task in ("task1", "task2"):

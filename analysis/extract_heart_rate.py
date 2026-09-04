@@ -154,13 +154,13 @@ def run(task: str, out_dir: Path, limit=None):
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
     ap.add_argument("--out", type=Path, default=Path("out/hr"))
     ap.add_argument("--limit", type=int, default=None,
                     help="cap the segment count, for a trial run")
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     run(a.task, a.out, a.limit)
 
 

@@ -421,7 +421,6 @@ def run_gradcam(model, df, class_names, image_dir, out, n_per_class=12, device="
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--model", default="1d", choices=["1d", "fusion"])
@@ -432,6 +431,7 @@ def main():
     ap.add_argument("--n-per-class", type=int, default=40)
     ap.add_argument("--out", type=Path, default=Path("out/interp"))
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     a.out.mkdir(parents=True, exist_ok=True)
 
     df, class_names = load_task(a.task)

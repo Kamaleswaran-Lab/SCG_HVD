@@ -187,7 +187,6 @@ def baseline_with_hr(md: pd.DataFrame, target="AS", n_splits=5, seed=42) -> dict
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--meta-dir", type=Path, default=None,
@@ -196,6 +195,7 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("out/covariates"))
     ap.add_argument("--target", default="AS")
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     a.out.mkdir(parents=True, exist_ok=True)
 
     # --- heart rate, all classes including controls ---

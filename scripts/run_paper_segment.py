@@ -55,7 +55,6 @@ def load_task(task):
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
     ap.add_argument("--models", nargs="+", default=["1d", "2d", "fusion"])
@@ -64,6 +63,7 @@ def main():
     ap.add_argument("--num-workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=42)
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
 
     df, class_names = load_task(a.task)
     split_df = segment_split(df)
