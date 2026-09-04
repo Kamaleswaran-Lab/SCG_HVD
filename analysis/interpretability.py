@@ -138,12 +138,13 @@ class GradCAM2D:
 
     def _forward_backward(self, inputs, class_idx):
         self.model.zero_grad()
+        # Clear before the forward pass, not after: the forward hooks fire during it.
+        self.acts.clear(); self.grads.clear()
         out = self.model(*inputs)
         # The index has to live on the same device as `out`; a CPU index against a CUDA
         # logit tensor fails inside gather.
         idx = (out.argmax(1) if class_idx is None
                else torch.as_tensor([class_idx], device=out.device))
-        self.acts.clear(); self.grads.clear()
         out.gather(1, idx.view(-1, 1).to(out.device)).sum().backward()
         acts, grads = self.acts, list(reversed(self.grads))
         if len(acts) != len(grads):
