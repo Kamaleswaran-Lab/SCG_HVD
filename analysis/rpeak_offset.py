@@ -14,7 +14,7 @@ exactly where the interesting observation sat.
 The measurement: for each detected peak, find the largest absolute deflection of the
 bandpass-filtered ECG within a short window around it, and record the signed difference. The
 detector's error is then the distribution of those differences, and what we care about is
-whether its centre differs between datasets.
+whether its center differs between datasets.
 
 Decision rule, fixed before running (see BPEX_R1/interpretability-plan.md): if the median
 offsets of the two datasets differ by less than 10 ms, the between-class timing comparison is
@@ -70,12 +70,12 @@ def offsets(ecg: np.ndarray, peaks, search_ms=60, fs=FS):
 
 def main():
     global DATA
-    DATA = data_root()
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--per-patient", type=int, default=8)
     ap.add_argument("--out", type=Path, default=Path("out/rpeak"))
     a = ap.parse_args()
+    DATA = data_root()
     a.out.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(DATA / "meta" / f"segment_metadata_{a.task}.csv")

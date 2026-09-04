@@ -15,8 +15,8 @@ What it makes.
 Rules the figures follow.
   - Always draw the baselines. A five-class accuracy is uninterpretable without them.
   - Error bars are 95% CIs across folds. Never across segments, which are not independent.
-  - Colour encodes role, not identity: baselines grey and dashed, only the proposed
-    configuration emphasised.
+  - Color encodes role, not identity: baselines gray and dashed, only the proposed
+    configuration emphasized.
   - Markers and line styles carry the distinction too, so the figures survive a monochrome
     printer.
 
@@ -70,7 +70,7 @@ _use_times()
 from analysis.final_report import collect  # noqa: E402
 
 # One accent for the condition under test, one neutral for what it is compared against, and a
-# grey for reference lines. Colour carries the comparison, not emphasis: the fused model is not
+# gray for reference lines. Color carries the comparison, not emphasis: the fused model is not
 # painted differently from the encoders it is being compared with.
 C_A = "#4c4c4c"        # first condition
 C_B = "#0072B2"        # second condition
@@ -317,10 +317,10 @@ def fig_attention_curve(interp_root: Path, out: Path, task="task1", model="fusio
 
     axes_order = [a for a in ("z", "x", "y") if a in set(d.axis)]
     classes = sorted(d["class"].unique())
-    # Colour is tied to the class, not to its position in the list, so adding or dropping a
-    # class never repaints the others. The four lesion hues pass the colour-vision checks as an
+    # Color is tied to the class, not to its position in the list, so adding or dropping a
+    # class never repaints the others. The four lesion hues pass the color-vision checks as an
     # adjacent set; the healthy class is the reference and is drawn black and dashed. Line style
-    # varies too, so the panel survives greyscale printing.
+    # varies too, so the panel survives grayscale printing.
     colors = {"AR": "#0072B2", "AS": "#D55E00", "MR": "#009E73", "MS": "#8E44AD",
               "N": "#111111"}
     styles = {"AR": "-", "AS": (0, (5, 1.5)), "MR": (0, (1, 1.2)), "MS": (0, (4, 1.2, 1, 1.2)),

@@ -3,12 +3,12 @@
 Six things this run is built to get right.
 
 1. Only the split differs from the published experiment. The model, the preprocessing and the
-   optimiser take the same code path as `run_paper_segment.py`, so any difference in
+   optimizer take the same code path as `run_paper_segment.py`, so any difference in
    performance can be attributed to the split by construction rather than by argument.
 2. The validation set never sees the test patients' labels. This is the defect in the archived
    LOOCV harness (`exp_loocv/evaluate.py:122-131`) that we are not repeating.
 3. Class weights come from the training split alone (`class_weight_scope="train"`). The
-   reproduction runs keep the canonical behaviour of using everything; new experiments do not.
+   reproduction runs keep the canonical behavior of using everything; new experiments do not.
 4. Both segment- and patient-level results are written. Clinical diagnosis is per patient, so
    the patient table is the primary one.
 5. The majority-class baseline goes out with every result. Without it the numbers cannot be
@@ -72,7 +72,6 @@ def load_task(task, nonoverlap=False):
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1", choices=["task1", "task2"])
     ap.add_argument("--model", default="fusion", choices=sorted(MODELS),
@@ -89,6 +88,7 @@ def main():
     ap.add_argument("--shuffle-labels", action="store_true",
                     help="permute labels within each patient group; a control, not an experiment")
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
 
     df, class_names = load_task(a.task, nonoverlap=a.nonoverlap)
     n_classes = len(class_names)

@@ -18,7 +18,7 @@ dorsoventral axis usually carries the largest amplitude. So if two datasets agre
   (b) the distribution of band-limited energy per axis, and
   (c) the correlation structure between axes,
 
-the labelling is plausibly consistent, and if the ordering is swapped that points at an axis
+the labeling is plausibly consistent, and if the ordering is swapped that points at an axis
 permutation.
 
 What is not checkable. This is a necessary condition, not a sufficient one. Similar statistics
@@ -80,12 +80,12 @@ def per_segment_features(x):
 
 def main():
     global DATA
-    DATA = data_root()   # fail here rather than on a puzzling missing file
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", default="task1")
     ap.add_argument("--per-patient", type=int, default=10, help="segments sampled per patient")
     ap.add_argument("--out", type=Path, default=Path("out/axis"))
     a = ap.parse_args()
+    DATA = data_root()   # fail here rather than on a puzzling missing file
     a.out.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(DATA / "meta" / f"segment_metadata_{a.task}.csv")
@@ -105,7 +105,7 @@ def main():
     print(f"=== {a.task}: per-axis variance share, averaged within each dataset ===")
     vf = d.groupby("dataset")[[f"var_frac_{ax}" for ax in AXES]].mean().round(3)
     print(vf.to_string())
-    print("\n  Matching orderings across datasets suggest the labelling is consistent.")
+    print("\n  Matching orderings across datasets suggest the labeling is consistent.")
     for ds, row in vf.iterrows():
         order = [AXES[i] for i in np.argsort(-row.values)]
         print(f"    {ds}: {' > '.join(order)}")

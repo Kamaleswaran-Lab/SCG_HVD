@@ -1,6 +1,6 @@
 # The training loop. It is told neither which model nor which split it was given, so every
 # experiment in the paper runs through this one path.
-"""The optimisation settings are carried over from the canonical archived scripts.
+"""The optimization settings are carried over from the canonical archived scripts.
 
     optimizer   AdamW(lr, weight_decay=1e-4)
     scheduler   CosineAnnealingLR(T_max=epochs)
@@ -8,14 +8,14 @@
     selection   the checkpoint at the highest validation accuracy
 
 `class_weight_scope` is the one setting made configurable rather than inherited. The archived
-code computed class weights over the whole labelled set
+code computed class weights over the whole labeled set
 (`archive/_canonical/1d__hvdnet_model.py:310`), which strictly uses information from outside
 the training split. We measured how much this matters and it is small -- the weights shift by
 0.041% on Task I and 0.52% on Task II -- but the fix is free, so reproduction runs pass "all"
 and new experiments pass "train".
 
 `drop_last` is conditional, and deliberately so. Setting it unconditionally would discard about
-0.4% of the training samples and one optimiser step in every fold, which is enough to make
+0.4% of the training samples and one optimizer step in every fold, which is enough to make
 comparisons against the archived results meaningless. The last batch is dropped only when it
 holds exactly one sample, which is the case where BatchNorm fails -- the crash that killed
 fold 27 of the archived LOOCV run.
